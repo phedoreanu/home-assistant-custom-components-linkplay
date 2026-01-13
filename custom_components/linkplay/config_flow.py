@@ -54,16 +54,35 @@ class LinkplayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             host = user_input[CONF_HOST].strip()
-            name = user_input.get(CONF_NAME, f"Linkplay Device ({host})")
+            name = user_input.get(CONF_NAME, "")
             protocol = user_input.get(CONF_PROTOCOL, "http")
 
-            # Validate device connectivity
-            if not await self._validate_device(host, protocol):
+            # Validate device connectivity and get device info
+            device_info = await self._validate_device(host, protocol)
+            if not device_info:
                 errors["base"] = "cannot_connect"
             else:
-                # Use host as unique ID
-                await self.async_set_unique_id(host)
-                self._abort_if_unique_id_configured()
+                # Use device UUID as unique ID (falls back to formatted MAC or host if UUID unavailable)
+                unique_id = device_info.get("uuid", "")
+                if not unique_id:
+                    # If no UUID, we cannot guarantee uniqueness - warn but allow
+                    _LOGGER.warning(
+                        "Device at %s does not provide UUID. "
+                        "This may cause issues with duplicate device detection.",
+                        host
+                    )
+                    # Use host as fallback (not ideal but better than nothing)
+                    unique_id = f"linkplay_{host.replace('.', '_')}"
+
+                # Check for existing entry with same UUID
+                await self.async_set_unique_id(unique_id)
+                self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+
+                # Use device name if provided by device and user didn't specify one
+                if not name and device_info.get("name"):
+                    name = device_info["name"]
+                elif not name:
+                    name = f"Linkplay Device ({host})"
 
                 return self.async_create_entry(
                     title=name,
@@ -94,21 +113,28 @@ class LinkplayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         host = discovery_info.host
         _LOGGER.debug("Zeroconf discovery for host: %s", host)
 
-        # Check if already configured
-        existing_entries = self._async_current_entries()
-        for entry in existing_entries:
-            if entry.data.get(CONF_HOST) == host:
-                return self.async_abort(reason="already_configured")
-
-        # Validate device
-        if not await self._validate_device(host, "http"):
+        # Validate device and get info
+        device_info = await self._validate_device(host, "http")
+        if not device_info:
             return self.async_abort(reason="cannot_connect")
 
-        await self.async_set_unique_id(host)
-        self._abort_if_unique_id_configured()
+        # Use device UUID as unique ID
+        unique_id = device_info.get("uuid", "")
+        if not unique_id:
+            _LOGGER.warning("Zeroconf device at %s has no UUID, using fallback", host)
+            unique_id = f"linkplay_{host.replace('.', '_')}"
 
-        device_name = f"Linkplay Device ({host})"
-        self.data = {CONF_HOST: host, "name": device_name, CONF_PROTOCOL: "http"}
+        await self.async_set_unique_id(unique_id)
+        self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+
+        # Use device name from device if available
+        device_name = device_info.get("name") or f"Linkplay Device ({host})"
+        self.data = {
+            CONF_HOST: host,
+            "name": device_name,
+            CONF_PROTOCOL: "http",
+            "uuid": unique_id,
+        }
         return await self.async_step_discovery_confirm()
 
     async def async_step_ssdp(self, discovery_info: SsdpServiceInfo) -> ConfigFlowResult:
@@ -122,24 +148,27 @@ class LinkplayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not host:
             return self.async_abort(reason="no_host")
 
-        # Check if already configured
-        existing_entries = self._async_current_entries()
-        for entry in existing_entries:
-            if entry.data.get(CONF_HOST) == host:
-                return self.async_abort(reason="already_configured")
-
-        # Validate device
-        if not await self._validate_device(host, "http"):
+        # Validate device and get info
+        device_info = await self._validate_device(host, "http")
+        if not device_info:
             return self.async_abort(reason="cannot_connect")
 
-        await self.async_set_unique_id(host)
-        self._abort_if_unique_id_configured()
+        # Use device UUID as unique ID
+        unique_id = device_info.get("uuid", "")
+        if not unique_id:
+            _LOGGER.warning("SSDP device at %s has no UUID, using fallback", host)
+            unique_id = f"linkplay_{host.replace('.', '_')}"
 
-        device_name = f"Linkplay Device ({host})"
+        await self.async_set_unique_id(unique_id)
+        self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+
+        # Use device name from device if available
+        device_name = device_info.get("name") or f"Linkplay Device ({host})"
         self.data = {
             CONF_HOST: host,
             "name": device_name,
             CONF_PROTOCOL: "http",
+            "uuid": unique_id,
             "ssdp_info": {"location": discovery_info.ssdp_location} if discovery_info.ssdp_location else {},
         }
         return await self.async_step_discovery_confirm()
@@ -179,18 +208,40 @@ class LinkplayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             protocol = user_input.get(CONF_PROTOCOL, "http")
 
             # Validate device at new IP address
-            if not await self._validate_device(host, protocol):
+            device_info = await self._validate_device(host, protocol)
+            if not device_info:
                 errors["base"] = "cannot_connect"
             else:
-                # Update entry with new IP and reload
-                return self.async_update_reload_and_abort(
-                    reconfigure_entry,
-                    data_updates={
-                        CONF_HOST: host,
-                        CONF_PROTOCOL: protocol,
-                    },
-                    reason="reconfigure_successful",
-                )
+                # Verify it's the same device by checking UUID
+                if device_info.get("uuid") and reconfigure_entry.unique_id:
+                    if device_info["uuid"] != reconfigure_entry.unique_id:
+                        errors["base"] = "different_device"
+                        _LOGGER.warning(
+                            "Device at %s has UUID %s but expected %s",
+                            host,
+                            device_info["uuid"],
+                            reconfigure_entry.unique_id,
+                        )
+                else:
+                    # UUID-based validation cannot be performed; proceed but log a warning
+                    _LOGGER.warning(
+                        "Cannot verify device identity during reconfigure for %s: "
+                        "missing UUID (device uuid=%s, entry unique_id=%s)",
+                        host,
+                        device_info.get("uuid"),
+                        reconfigure_entry.unique_id,
+                    )
+
+                if not errors:
+                    # Update entry with new IP and reload
+                    return self.async_update_reload_and_abort(
+                        reconfigure_entry,
+                        data_updates={
+                            CONF_HOST: host,
+                            CONF_PROTOCOL: protocol,
+                        },
+                        reason="reconfigure_successful",
+                    )
 
         # Show form with current IP pre-filled
         schema = vol.Schema(
@@ -217,19 +268,34 @@ class LinkplayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
-    async def _validate_device(self, host: str, protocol: str) -> bool:
-        """Validate device connectivity by making a simple HTTP request."""
+    async def _validate_device(self, host: str, protocol: str) -> dict[str, Any] | None:
+        """Validate device connectivity and retrieve device information.
+
+        Returns device info dict with 'uuid' and 'name' if successful, None otherwise.
+        """
         try:
             session = async_get_clientsession(self.hass)
             url = f"{protocol}://{host}/httpapi.asp?command=getStatus"
 
             async with session.get(url, ssl=False, timeout=5) as response:
-                # Accept any response - device is reachable if it responds
-                return response.status in (200, 400, 401, 403)
+                if response.status == 200:
+                    data = await response.json(content_type=None)
+                    # Extract UUID and device name from response
+                    device_info = {
+                        "uuid": data.get("uuid", ""),
+                        "name": data.get("DeviceName", ""),
+                    }
+                    _LOGGER.debug("Device info for %s: %s", host, device_info)
+                    return device_info
+                elif response.status in (400, 401, 403):
+                    # Device responds but doesn't provide JSON - still valid
+                    _LOGGER.warning("Device at %s responded with status %s, UUID unavailable", host, response.status)
+                    return {"uuid": "", "name": ""}
+                return None
 
         except Exception as err:
             _LOGGER.debug("Device validation failed for %s: %s", host, err)
-            return False
+            return None
 
     def is_matching(self, other_flow: config_entries.ConfigFlow) -> bool:
         """Check if two flows are matching."""

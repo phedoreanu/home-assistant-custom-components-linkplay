@@ -20,19 +20,23 @@ from custom_components.linkplay.const import DOMAIN
 
 # MockConfigEntry compatibility
 try:
-    from homeassistant.test.common import MockConfigEntry
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
 except ImportError:
-    # Fallback for older Home Assistant versions
-    class MockConfigEntry:  # type: ignore
-        """Mock config entry."""
-        def __init__(self, domain, data, title=None):
-            self.domain = domain
-            self.data = data
-            self.title = title or "Mock Entry"
+    try:
+        from homeassistant.test.common import MockConfigEntry
+    except ImportError:
+        # Fallback for older Home Assistant versions
+        class MockConfigEntry:  # type: ignore
+            """Mock config entry."""
+            def __init__(self, domain, data, title=None, unique_id=None):
+                self.domain = domain
+                self.data = data
+                self.title = title or "Mock Entry"
+                self.unique_id = unique_id
 
-        def add_to_hass(self, hass):
-            """Add to hass."""
-            pass
+            def add_to_hass(self, hass):
+                """Add to hass."""
+                pass
 
 
 class TestLinkplayConfigFlow:
@@ -64,7 +68,7 @@ class TestLinkplayConfigFlow:
         flow.hass = hass
 
         with patch.object(flow, "_validate_device", new_callable=AsyncMock) as mock_validate:
-            mock_validate.return_value = True
+            mock_validate.return_value = {"uuid": "FF31F09E82A6BBC1A2CB6D80", "name": "Test Device"}
             with patch.object(
                 flow, "async_set_unique_id"
             ) as mock_set_unique_id:
@@ -84,7 +88,7 @@ class TestLinkplayConfigFlow:
         assert result["data"][CONF_HOST] == "192.168.1.100"
         assert result["data"][CONF_NAME] == "Living Room Speaker"
         assert result["data"][CONF_PROTOCOL] == "http"
-        mock_set_unique_id.assert_called_once_with("192.168.1.100")
+        mock_set_unique_id.assert_called_once_with("FF31F09E82A6BBC1A2CB6D80")
 
     @pytest.mark.asyncio
     async def test_async_step_manual_failure_cannot_connect(
@@ -95,7 +99,7 @@ class TestLinkplayConfigFlow:
         flow.hass = hass
 
         with patch.object(flow, "_validate_device", new_callable=AsyncMock) as mock_validate:
-            mock_validate.return_value = False
+            mock_validate.return_value = None
 
             result = await flow.async_step_manual(
                 user_input={
@@ -116,7 +120,7 @@ class TestLinkplayConfigFlow:
         flow.hass = hass
 
         with patch.object(flow, "_validate_device", new_callable=AsyncMock) as mock_validate:
-            mock_validate.return_value = True
+            mock_validate.return_value = {"uuid": "FF31F09E82A6BBC1A2CB6D80", "name": "Device Name From Hardware"}
             with patch.object(
                 flow, "async_set_unique_id"
             ):
@@ -131,7 +135,8 @@ class TestLinkplayConfigFlow:
                     )
 
         assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
-        assert "Linkplay Device (192.168.1.100)" in result["title"]
+        # Should use device name from hardware since no name provided by user
+        assert result["title"] == "Device Name From Hardware"
 
     @pytest.mark.asyncio
     async def test_async_step_manual_https_protocol(self, hass: HomeAssistant):
@@ -140,7 +145,7 @@ class TestLinkplayConfigFlow:
         flow.hass = hass
 
         with patch.object(flow, "_validate_device", new_callable=AsyncMock) as mock_validate:
-            mock_validate.return_value = True
+            mock_validate.return_value = {"uuid": "FF31F09E82A6BBC1A2CB6D80", "name": ""}
             with patch.object(
                 flow, "async_set_unique_id"
             ):
@@ -164,7 +169,7 @@ class TestLinkplayConfigFlow:
         flow.hass = hass
 
         with patch.object(flow, "_validate_device", new_callable=AsyncMock) as mock_validate:
-            mock_validate.return_value = True
+            mock_validate.return_value = {"uuid": "FF31F09E82A6BBC1A2CB6D80", "name": ""}
             with patch.object(
                 flow, "async_set_unique_id"
             ) as mock_set_unique_id:
@@ -179,7 +184,7 @@ class TestLinkplayConfigFlow:
                     )
 
         assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
-        mock_set_unique_id.assert_called_once_with("192.168.1.100")
+        mock_set_unique_id.assert_called_once_with("FF31F09E82A6BBC1A2CB6D80")
         mock_validate.assert_called_once_with("192.168.1.100", "http")
 
     @pytest.mark.asyncio
@@ -199,7 +204,7 @@ class TestLinkplayConfigFlow:
         )
 
         with patch.object(flow, "_validate_device", new_callable=AsyncMock) as mock_validate:
-            mock_validate.return_value = True
+            mock_validate.return_value = {"uuid": "FF31F09E82A6BBC1A2CB6D80", "name": "Discovered Device"}
             with patch.object(
                 flow, "async_set_unique_id"
             ):
@@ -214,12 +219,10 @@ class TestLinkplayConfigFlow:
     @pytest.mark.asyncio
     async def test_async_step_zeroconf_already_configured(self, hass: HomeAssistant):
         """Test Zeroconf discovery when device already configured."""
-        flow = LinkplayConfigFlow()
-        flow.hass = hass
-
-        # Create a mock entry for already configured case
+        # Create a mock entry with UUID as unique_id
         entry = MockConfigEntry(
             domain=DOMAIN,
+            unique_id="FF31F09E82A6BBC1A2CB6D80",
             data={CONF_HOST: "192.168.1.100"},
         )
         entry.add_to_hass(hass)
@@ -234,12 +237,24 @@ class TestLinkplayConfigFlow:
             type="_http._tcp.local.",
         )
 
-        # Mock _async_current_entries to return our test entry
-        with patch.object(flow, "_async_current_entries", return_value=[entry]):
-            result = await flow.async_step_zeroconf(discovery_info)
+        flow = LinkplayConfigFlow()
+        flow.hass = hass
 
-        assert result["type"] == data_entry_flow.FlowResultType.ABORT
-        assert result["reason"] == "already_configured"
+        from homeassistant.data_entry_flow import AbortFlow
+
+        with patch.object(flow, "_validate_device", new_callable=AsyncMock) as mock_validate:
+            mock_validate.return_value = {"uuid": "FF31F09E82A6BBC1A2CB6D80", "name": "Device"}
+            with patch.object(flow, "async_set_unique_id"):
+                with patch.object(flow, "_abort_if_unique_id_configured") as mock_abort:
+                    # _abort_if_unique_id_configured raises AbortFlow when device exists
+                    mock_abort.side_effect = AbortFlow("already_configured")
+
+                    # The AbortFlow exception should be raised
+                    with pytest.raises(AbortFlow) as exc_info:
+                        await flow.async_step_zeroconf(discovery_info)
+
+                    # Verify the abort reason
+                    assert exc_info.value.reason == "already_configured"
 
     @pytest.mark.asyncio
     async def test_async_step_zeroconf_cannot_connect(self, hass: HomeAssistant):
@@ -258,7 +273,7 @@ class TestLinkplayConfigFlow:
         )
 
         with patch.object(flow, "_validate_device", new_callable=AsyncMock) as mock_validate:
-            mock_validate.return_value = False
+            mock_validate.return_value = None
 
             result = await flow.async_step_zeroconf(discovery_info)
 
@@ -279,7 +294,7 @@ class TestLinkplayConfigFlow:
         )
 
         with patch.object(flow, "_validate_device", new_callable=AsyncMock) as mock_validate:
-            mock_validate.return_value = True
+            mock_validate.return_value = {"uuid": "FF31F09E82A6BBC1A2CB6D80", "name": "SSDP Device"}
             with patch.object(
                 flow, "async_set_unique_id"
             ):
@@ -323,7 +338,7 @@ class TestLinkplayConfigFlow:
         )
 
         with patch.object(flow, "_validate_device", new_callable=AsyncMock) as mock_validate:
-            mock_validate.return_value = False
+            mock_validate.return_value = None
 
             result = await flow.async_step_ssdp(discovery_info)
 
@@ -400,6 +415,7 @@ class TestLinkplayConfigFlow:
         """Test successful reconfiguration."""
         entry = MockConfigEntry(
             domain=DOMAIN,
+            unique_id="FF31F09E82A6BBC1A2CB6D80",
             data={CONF_HOST: "192.168.1.100", CONF_PROTOCOL: "http"},
             title="Living Room Speaker",
         )
@@ -410,7 +426,7 @@ class TestLinkplayConfigFlow:
 
         with patch.object(flow, "_get_reconfigure_entry", return_value=entry):
             with patch.object(flow, "_validate_device", new_callable=AsyncMock) as mock_validate:
-                mock_validate.return_value = True
+                mock_validate.return_value = {"uuid": "FF31F09E82A6BBC1A2CB6D80", "name": "Device"}
                 with patch.object(
                     flow, "async_update_reload_and_abort"
                 ) as mock_update:
@@ -441,7 +457,7 @@ class TestLinkplayConfigFlow:
 
         with patch.object(flow, "_get_reconfigure_entry", return_value=entry):
             with patch.object(flow, "_validate_device", new_callable=AsyncMock) as mock_validate:
-                mock_validate.return_value = False
+                mock_validate.return_value = None
 
                 result = await flow.async_step_reconfigure(
                     user_input={
@@ -481,6 +497,10 @@ class TestLinkplayConfigFlow:
 
         mock_response = MagicMock()
         mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={
+            "uuid": "FF31F09E82A6BBC1A2CB6D80",
+            "DeviceName": "Test Device"
+        })
 
         mock_context = AsyncMock()
         mock_context.__aenter__.return_value = mock_response
@@ -495,7 +515,9 @@ class TestLinkplayConfigFlow:
 
             result = await flow._validate_device("192.168.1.100", "http")
 
-        assert result is True
+        assert result is not None
+        assert result["uuid"] == "FF31F09E82A6BBC1A2CB6D80"
+        assert result["name"] == "Test Device"
         mock_client.get.assert_called_once()
         assert "192.168.1.100" in str(mock_client.get.call_args)
 
@@ -507,6 +529,10 @@ class TestLinkplayConfigFlow:
 
         mock_response = MagicMock()
         mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={
+            "uuid": "FF31F09E82A6BBC1A2CB6D80",
+            "DeviceName": "HTTPS Device"
+        })
 
         mock_context = AsyncMock()
         mock_context.__aenter__.return_value = mock_response
@@ -521,7 +547,8 @@ class TestLinkplayConfigFlow:
 
             result = await flow._validate_device("192.168.1.100", "https")
 
-        assert result is True
+        assert result is not None
+        assert result["uuid"] == "FF31F09E82A6BBC1A2CB6D80"
 
     @pytest.mark.asyncio
     async def test_validate_device_timeout(self, hass: HomeAssistant):
@@ -538,7 +565,7 @@ class TestLinkplayConfigFlow:
 
             result = await flow._validate_device("192.168.1.100", "http")
 
-        assert result is False
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_validate_device_connection_error(self, hass: HomeAssistant):
@@ -559,7 +586,7 @@ class TestLinkplayConfigFlow:
 
             result = await flow._validate_device("192.168.1.100", "http")
 
-        assert result is False
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_validate_device_ssl_error(self, hass: HomeAssistant):
@@ -579,7 +606,7 @@ class TestLinkplayConfigFlow:
 
             result = await flow._validate_device("192.168.1.100", "https")
 
-        assert result is False
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_validate_device_400_response(self, hass: HomeAssistant):
@@ -603,7 +630,9 @@ class TestLinkplayConfigFlow:
 
             result = await flow._validate_device("192.168.1.100", "http")
 
-        assert result is True
+        # Status 400 returns empty dict (device responds but no UUID)
+        assert result is not None
+        assert result == {"uuid": "", "name": ""}
 
     @pytest.mark.asyncio
     async def test_validate_device_unreachable(self, hass: HomeAssistant):
@@ -625,7 +654,8 @@ class TestLinkplayConfigFlow:
 
             result = await flow._validate_device("192.168.1.100", "http")
 
-        assert result is False
+        # Status 500 returns None (not a valid response)
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_async_get_options_flow(self):

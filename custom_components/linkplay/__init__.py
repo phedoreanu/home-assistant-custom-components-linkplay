@@ -4,13 +4,18 @@ Support for LinkPlay based devices.
 For more details about this platform, please refer to the documentation at
 https://github.com/phedoreanu/home-assistant-custom-components-linkplay
 """
+from __future__ import annotations
+
 import logging
 import voluptuous as vol
 
-from homeassistant.const import ATTR_ENTITY_ID
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import ATTR_ENTITY_ID, Platform
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
 DOMAIN = 'linkplay'
+PLATFORMS = [Platform.MEDIA_PLAYER]
 
 SERVICE_JOIN = 'join'
 SERVICE_UNJOIN = 'unjoin'
@@ -65,8 +70,47 @@ PLYTRK_SERVICE_SCHEMA = vol.Schema({
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup(hass, config):
-    """Handle service configuration."""
+
+class LinkPlayData:
+    """Storage class for platform global data."""
+    def __init__(self):
+        """Initialize the data."""
+        self.entities = []
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the Linkplay component from YAML configuration."""
+    hass.data.setdefault(DOMAIN, LinkPlayData())
+
+    # Register services
+    await async_setup_services(hass)
+
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up Linkplay from a config entry."""
+    hass.data.setdefault(DOMAIN, LinkPlayData())
+
+    # Forward the setup to the media_player platform
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Register services if not already registered
+    if not hass.services.has_service(DOMAIN, SERVICE_JOIN):
+        await async_setup_services(hass)
+
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload a config entry."""
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+    return unload_ok
+
+
+async def async_setup_services(hass: HomeAssistant) -> None:
+    """Set up services for Linkplay integration."""
 
     async def async_service_handle(service):
         """Handle services."""
@@ -137,7 +181,7 @@ async def async_setup(hass, config):
                     _LOGGER.debug("**PLAY TRACK** entity: %s; track: %s", device.entity_id, track)
                     await device.async_play_track(track)
 
-
+    # Register all services
     hass.services.async_register(
         DOMAIN, SERVICE_JOIN, async_service_handle, schema=JOIN_SERVICE_SCHEMA)
     hass.services.async_register(
@@ -153,4 +197,3 @@ async def async_setup(hass, config):
     hass.services.async_register(
         DOMAIN, SERVICE_PLAY, async_service_handle, schema=PLYTRK_SERVICE_SCHEMA)
 
-    return True

@@ -284,6 +284,83 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
     async_add_entities([linkplay])
 
+
+async def async_setup_entry(hass, entry, async_add_entities):
+    """Set up Linkplay media player from a config entry."""
+    from . import LinkPlayData as InitLinkPlayData
+
+    if DOMAIN not in hass.data:
+        hass.data[DOMAIN] = InitLinkPlayData()
+
+    # Get configuration from config entry
+    host = entry.data.get(CONF_HOST)
+    name = entry.data.get(CONF_NAME, f"Linkplay Device ({host})")
+    protocol = entry.data.get(CONF_PROTOCOL, "http")
+
+    # Use defaults for options that aren't in config flow
+    sources = None
+    common_sources = None
+    icecast_metadata = DEFAULT_ICECAST_UPDATE
+    multiroom_wifidirect = DEFAULT_MULTIROOM_WIFIDIRECT
+    led_off = DEFAULT_LEDOFF
+    volume_step = DEFAULT_VOLUME_STEP
+    lastfm_api_key = None
+    uuid = entry.unique_id or ""
+
+    state = STATE_IDLE
+
+    websession = async_get_clientsession(hass)
+    response = None
+
+    try:
+        initurl = f"{protocol}://{host}/httpapi.asp?command=getStatus"
+        response = await websession.get(initurl, timeout=aiohttp.ClientTimeout(total=API_TIMEOUT))
+
+    except (asyncio.TimeoutError, aiohttp.ClientError) as error:
+        _LOGGER.warning(
+            "Failed communicating with LinkPlayDevice (config_entry) '%s': %s", host, type(error)
+        )
+        state = STATE_UNAVAILABLE
+
+    if response and response.status == HTTPStatus.OK:
+        data = await response.json(content_type=None)
+        _LOGGER.debug("HOST: %s DATA response: %s", host, data)
+
+        if 'uuid' in data and not uuid:
+            uuid = data['uuid']
+
+        if 'DeviceName' in data:
+            # Use device name from hardware if available
+            device_name = data['DeviceName']
+            if device_name:
+                name = device_name
+    else:
+        _LOGGER.warning(
+            "Get Status failed for %s, response code: %s",
+            host,
+            response.status if response is not None else "Unknown",
+        )
+        state = STATE_UNAVAILABLE
+
+    linkplay = LinkPlayDevice(
+        name,
+        host,
+        protocol,
+        sources,
+        common_sources,
+        icecast_metadata,
+        multiroom_wifidirect,
+        led_off,
+        volume_step,
+        lastfm_api_key,
+        uuid,
+        state,
+        hass,
+    )
+
+    async_add_entities([linkplay])
+
+
 class LinkPlayDevice(MediaPlayerEntity):
     """LinkPlayDevice Player Object."""
 
