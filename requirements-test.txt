@@ -1,8 +1,22 @@
-pytest>=7.0.0
-pytest-asyncio>=0.20.0
-pytest-cov>=4.0.0
-pytest-homeassistant-custom-component>=0.13.2
-aiohttp>=3.8.0
-voluptuous>=0.13.0
-homeassistant>=2026.1.0
+-r requirements-dev.txt
 
+# Home Assistant Core compatible test dependencies
+# pytest-homeassistant-custom-component provides ALL pytest plugins and dependencies:
+# - pytest
+# - pytest-asyncio
+# - pytest-cov
+# - pytest-timeout
+# - pytest-xdist
+# Do NOT explicitly list these - it causes version conflicts!
+
+pytest-homeassistant-custom-component==0.13.251
+
+# Test utilities
+aresponses>=2.1.6
+freezegun>=1.2.2
+zeroconf
+
+# Code quality
+flake8>=6.0.0
+ruff>=0.4.2
+diff-cover>=9.0.0
