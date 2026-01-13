@@ -287,7 +287,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up Linkplay media player from a config entry."""
-    from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PROTOCOL
 
     if DOMAIN not in hass.data:
         hass.data[DOMAIN] = LinkPlayData()
