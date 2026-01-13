@@ -328,12 +328,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
         if 'uuid' in data and not uuid:
             uuid = data['uuid']
-
-        if 'DeviceName' in data:
-            # Use device name from hardware if available
-            device_name = data['DeviceName']
-            if device_name:
-                name = device_name
     else:
         _LOGGER.warning(
             "Get Status failed for %s, response code: %s",
