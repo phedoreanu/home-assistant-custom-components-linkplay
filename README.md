@@ -13,7 +13,9 @@ For any bugs, feature requests, or PRs, please use the official Home Assistant c
 ---
 **For Home Assistant versions before 2024.08:**
 
-This component allows you to integrate control of audio devices based on Linkplay A31 chipset into your [Home Assistant](http://www.home-assistant.io) smart home system. Originally developed by nicjo814, maintained by limych. This version rewritten by nagyrobi. Read more about Linkplay at the bottom of this file.
+This component allows you to integrate control of audio devices based on Linkplay A31 chipset into your [Home Assistant](http://www.home-assistant.io) smart home system. 
+Originally developed by nicjo814, maintained by limych, archived by nagyrobi, and now maintained by phedoreanu.
+Read more about Linkplay at the bottom of this file.
 
 Fully compatible with [Mini Media Player card for Lovelace UI](https://github.com/kalkih/mini-media-player) by kalkih, including speaker group management.
 
@@ -332,6 +334,7 @@ There are quite a few manufacturers and devices that operate on the basis of Lin
     "@nicjo814",
     "@limych",
     "@nagyrobi"
+    "@phedoreanu"
 
 ## Home Assistant component License
 
@@ -340,6 +343,7 @@ MIT License
 - Copyright (c) 2019 Niclas Berglind nicjo814
 - Copyright (c) 2019—2020 Andrey "Limych" Khrolenok
 - Copyright (c) 2020 nagyrobi Robert Horvath-Arkosi
+- Copyright (c) 2026 phedoreanu
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

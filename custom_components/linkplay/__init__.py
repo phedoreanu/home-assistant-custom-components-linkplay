@@ -2,7 +2,7 @@
 Support for LinkPlay based devices.
 
 For more details about this platform, please refer to the documentation at
-https://github.com/nagyrobi/home-assistant-custom-components-linkplay
+https://github.com/phedoreanu/home-assistant-custom-components-linkplay
 """
 import logging
 import voluptuous as vol

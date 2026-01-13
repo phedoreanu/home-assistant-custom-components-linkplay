@@ -2,7 +2,7 @@
 Support for Linkplay based devices.
 
 For more details about this platform, please refer to the documentation at
-https://github.com/nagyrobi/home-assistant-custom-components-linkplay
+https://github.com/phedoreanu/home-assistant-custom-components-linkplay
 """
 
 import asyncio
@@ -401,21 +401,49 @@ class LinkPlayDevice(MediaPlayerEntity):
             _LOGGER.warning("Protocol not known. Skipping communication with LinkPlayDevice '%s'", self._name)
             return False
 
-        url = "{}://{}/httpapi.asp?command={}".format(self._protocol if protocol is None else protocol, self._host, cmd)
-        
+        proto = self._protocol if protocol is None else protocol
+        url = "{}://{}/httpapi.asp?command={}".format(proto, self._host, cmd)
+
         if self._first_update:
             timeout = 10
         else:
             timeout = API_TIMEOUT
         
+        # Determine SSL verification: disable for HTTP, use default for HTTPS
+        verify_ssl = proto == "https"
+
         try:
             websession = async_get_clientsession(self.hass)
             async with async_timeout.timeout(timeout):
-                response = await websession.get(url, ssl=False)
+                response = await websession.get(url, ssl=verify_ssl, allow_redirects=True)
 
-        except (asyncio.TimeoutError, aiohttp.ClientError) as error:
+        except (asyncio.TimeoutError, TimeoutError) as error:
             _LOGGER.warning(
-                "Failed communicating with LinkPlayDevice (httpapi) '%s': %s", self._name, type(error)
+                "Failed communicating with LinkPlayDevice (httpapi) '%s': Timeout", self._name
+            )
+            return False
+        except aiohttp.ClientSSLError as error:
+            _LOGGER.warning(
+                "Failed communicating with LinkPlayDevice (httpapi) '%s': SSL Error - %s. Try using 'http' protocol",
+                self._name, str(error)
+            )
+            return False
+        except aiohttp.ClientConnectorError as error:
+            _LOGGER.warning(
+                "Failed communicating with LinkPlayDevice (httpapi) '%s': Connection Error - %s",
+                self._name, str(error)
+            )
+            return False
+        except aiohttp.ClientError as error:
+            _LOGGER.warning(
+                "Failed communicating with LinkPlayDevice (httpapi) '%s': %s",
+                self._name, type(error).__name__
+            )
+            return False
+        except Exception as error:
+            _LOGGER.warning(
+                "Failed communicating with LinkPlayDevice (httpapi) '%s': Unexpected error - %s",
+                self._name, str(error)
             )
             return False
 
@@ -641,7 +669,7 @@ class LinkPlayDevice(MediaPlayerEntity):
                 self._is_master = False
                 self._master = None
 
-            # TODO: https://github.com/nagyrobi/home-assistant-custom-components-linkplay/compare/master...akloeckner:home-assistant-custom-components-linkplay:dev
+            # TODO: https://github.com/phedoreanu/home-assistant-custom-components-linkplay/compare/master...akloeckner:home-assistant-custom-components-linkplay:dev
             if not self._is_master:
                 self._master = None
                 self._multiroom_group = []
