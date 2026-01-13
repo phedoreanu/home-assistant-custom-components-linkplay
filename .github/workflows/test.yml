@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  DEFAULT_PYTHON: "3.12"
+  DEFAULT_PYTHON: "3.13"
 
 jobs:
   tests:
@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 15
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.13", "3.14"]
     steps:
       - name: Check out code from GitHub
         uses: actions/checkout@v5
@@ -41,7 +41,7 @@ jobs:
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4
-        if: matrix.python-version == '3.12'
+        if: matrix.python-version == '3.13'
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
