@@ -287,9 +287,10 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up Linkplay media player from a config entry."""
+    from . import LinkPlayData as InitLinkPlayData
 
     if DOMAIN not in hass.data:
-        hass.data[DOMAIN] = LinkPlayData()
+        hass.data[DOMAIN] = InitLinkPlayData()
 
     # Get configuration from config entry
     host = entry.data.get(CONF_HOST)
