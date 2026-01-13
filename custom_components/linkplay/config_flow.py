@@ -218,8 +218,19 @@ class LinkplayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         errors["base"] = "different_device"
                         _LOGGER.warning(
                             "Device at %s has UUID %s but expected %s",
-                            host, device_info["uuid"], reconfigure_entry.unique_id
+                            host,
+                            device_info["uuid"],
+                            reconfigure_entry.unique_id,
                         )
+                else:
+                    # UUID-based validation cannot be performed; proceed but log a warning
+                    _LOGGER.warning(
+                        "Cannot verify device identity during reconfigure for %s: "
+                        "missing UUID (device uuid=%s, entry unique_id=%s)",
+                        host,
+                        device_info.get("uuid"),
+                        reconfigure_entry.unique_id,
+                    )
 
                 if not errors:
                     # Update entry with new IP and reload
