@@ -7,14 +7,20 @@ https://github.com/phedoreanu/home-assistant-custom-components-linkplay
 from __future__ import annotations
 
 import logging
+import asyncio
+import aiohttp
+from http import HTTPStatus
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_ENTITY_ID, Platform
+from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.const import ATTR_ENTITY_ID, Platform, CONF_HOST, CONF_PROTOCOL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-DOMAIN = 'linkplay'
+from .const import DOMAIN, API_TIMEOUT
+
 PLATFORMS = [Platform.MEDIA_PLAYER]
 
 SERVICE_JOIN = 'join'
@@ -91,6 +97,20 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Linkplay from a config entry."""
     hass.data.setdefault(DOMAIN, LinkPlayData())
+
+    host = entry.data.get(CONF_HOST)
+    protocol = entry.data.get(CONF_PROTOCOL, "http")
+    websession = async_get_clientsession(hass)
+
+    try:
+        initurl = f"{protocol}://{host}/httpapi.asp?command=getStatus"
+        response = await websession.get(initurl, timeout=aiohttp.ClientTimeout(total=API_TIMEOUT), ssl=False)
+
+    except (asyncio.TimeoutError, aiohttp.ClientError) as error:
+        raise ConfigEntryNotReady(f"Failed communicating with LinkPlayDevice {host}: {error}") from error
+
+    if not response or response.status != HTTPStatus.OK:
+        raise ConfigEntryNotReady(f"Get Status failed for {host}, response code: {response.status if response is not None else 'Unknown'}")
 
     # Forward the setup to the media_player platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

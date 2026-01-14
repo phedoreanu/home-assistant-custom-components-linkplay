@@ -35,7 +35,7 @@ from homeassistant.util import Throttle
 from homeassistant.util.dt import utcnow
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
-from homeassistant.exceptions import ConfigEntryNotReady
+#from homeassistant.exceptions import ConfigEntryNotReady
 
 from homeassistant.components.media_player import (
     PLATFORM_SCHEMA, 
@@ -82,6 +82,7 @@ from .const import (
     DEFAULT_MULTIROOM_WIFIDIRECT,
     DEFAULT_LEDOFF,
     DEFAULT_VOLUME_STEP,
+    API_TIMEOUT,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -131,7 +132,7 @@ ROOTDIR_USB = '/media/sda1/'
 UUID_ARYLIC = 'FF31F09E'
 TCPPORT = 8899
 UPNP_TIMEOUT = 2
-API_TIMEOUT = 2
+#API_TIMEOUT = 2
 SCAN_INTERVAL = timedelta(seconds=3)
 ICE_THROTTLE = timedelta(seconds=45)
 LFM_THROTTLE = timedelta(seconds=4)
@@ -337,27 +338,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     websession = async_get_clientsession(hass)
     response = None
 
-    try:
-        initurl = f"{protocol}://{host}/httpapi.asp?command=getStatus"
-        response = await websession.get(initurl, timeout=aiohttp.ClientTimeout(total=API_TIMEOUT), ssl=False)
-
-    except (asyncio.TimeoutError, aiohttp.ClientError) as error:
-        raise ConfigEntryNotReady(f"Failed communicating with LinkPlayDevice {host}: {error}") from error
-
-    if response and response.status == HTTPStatus.OK:
-        data = await response.json(content_type=None)
-        _LOGGER.debug("HOST: %s DATA response: %s", host, data)
-
-        if 'uuid' in data and not uuid:
-            uuid = data['uuid']
-
-        if 'DeviceName' in data:
-            # Use device name from hardware if available
-            device_name = data['DeviceName']
-            if device_name:
-                name = device_name
-    else:
-        raise ConfigEntryNotReady(f"Get Status failed for {host}, response code: {response.status if response is not None else 'Unknown'}")
+    # Connection check moved to __init__.py
 
     linkplay = LinkPlayDevice(
         name,
