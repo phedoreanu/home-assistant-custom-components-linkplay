@@ -35,6 +35,7 @@ from homeassistant.util import Throttle
 from homeassistant.util.dt import utcnow
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
+from homeassistant.exceptions import ConfigEntryNotReady
 
 from homeassistant.components.media_player import (
     PLATFORM_SCHEMA, 
@@ -338,13 +339,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     try:
         initurl = f"{protocol}://{host}/httpapi.asp?command=getStatus"
-        response = await websession.get(initurl, timeout=aiohttp.ClientTimeout(total=API_TIMEOUT))
+        response = await websession.get(initurl, timeout=aiohttp.ClientTimeout(total=API_TIMEOUT), ssl=False)
 
     except (asyncio.TimeoutError, aiohttp.ClientError) as error:
-        _LOGGER.warning(
-            "Failed communicating with LinkPlayDevice (config_entry) '%s': %s", host, type(error)
-        )
-        state = STATE_UNAVAILABLE
+        raise ConfigEntryNotReady(f"Failed communicating with LinkPlayDevice {host}: {error}") from error
 
     if response and response.status == HTTPStatus.OK:
         data = await response.json(content_type=None)
@@ -359,12 +357,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             if device_name:
                 name = device_name
     else:
-        _LOGGER.warning(
-            "Get Status failed for %s, response code: %s",
-            host,
-            response.status if response is not None else "Unknown",
-        )
-        state = STATE_UNAVAILABLE
+        raise ConfigEntryNotReady(f"Get Status failed for {host}, response code: {response.status if response is not None else 'Unknown'}")
 
     linkplay = LinkPlayDevice(
         name,
@@ -511,7 +504,7 @@ class LinkPlayDevice(MediaPlayerEntity):
             timeout = API_TIMEOUT
         
         # Determine SSL verification: disable for HTTP, use default for HTTPS
-        verify_ssl = proto == "https"
+        verify_ssl = False # proto == "https"
 
         try:
             websession = async_get_clientsession(self.hass)
@@ -747,7 +740,7 @@ class LinkPlayDevice(MediaPlayerEntity):
                             url = "http://{0}:49152/description.xml".format(self._host)
                             try:
                                 self._upnp_device = await self._factory.async_create_device(url)
-                            except:
+                            except Exception as error:
                                 _LOGGER.warning(
                                     "Failed communicating with LinkPlayDevice (UPnP) '%s': %s", self._name, type(error)
                                 )
@@ -2422,10 +2415,11 @@ class LinkPlayDevice(MediaPlayerEntity):
                     await slave.async_set_media_artist(self._media_artist)
 #                    await slave.async_set_muted(self._muted)
                     await slave.async_set_state(self.state)
-                    await slave.async_set_slave_ip(self._host)
+                    await slave.async_set_slave_ip(slave['ip'])
                     await slave.async_set_media_image_url(self._media_image_url)
                     await slave.async_set_playhead_position(self.media_position)
                     await slave.async_set_duration(self.media_duration)
+                    await slave.async_set_position_updated_at(self.media_position_updated_at)
                     await slave.async_set_source(self._source)
                     await slave.async_set_sound_mode(self._sound_mode)
                     await slave.async_set_features(self._features)
@@ -2551,7 +2545,7 @@ class LinkPlayDevice(MediaPlayerEntity):
                 if value == 'OK':
                     value = value + ", SoftAP SSID set to: " + ssidnam
             else:
-                value == "SSID not specified correctly. You need 'SetApSSIDName: NewWifiName'"
+                value = "SSID not specified correctly. You need 'SetApSSIDName: NewWifiName'"
         elif command.startswith('WriteDeviceNameToUnit:'):
             devnam = command.replace('WriteDeviceNameToUnit:', '').strip()
             if devnam != '':
@@ -2560,7 +2554,7 @@ class LinkPlayDevice(MediaPlayerEntity):
                     self._name = devnam
                     value = value + ", name set to: " + self._name
             else:
-                value == "Device name not specified correctly. You need 'WriteDeviceNameToUnit: My Device Name'"
+                value = "Device name not specified correctly. You need 'WriteDeviceNameToUnit: My Device Name'"
         elif command == 'TimeSync':
             import time
             tme = time.strftime('%Y%m%d%H%M%S')
@@ -2748,6 +2742,7 @@ class LinkPlayDevice(MediaPlayerEntity):
                 self._playhead_position = 0
                 self._duration = 0
                 self._position_updated_at = utcnow()
+                self._idletime_updated_at = self._position_updated_at
                 self._media_image_url = None
                 self._media_uri = None
                 self._media_uri_final = None
