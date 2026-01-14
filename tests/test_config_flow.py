@@ -16,7 +16,7 @@ from custom_components.linkplay.config_flow import (
     LinkplayConfigFlow,
     LinkplayOptionsFlow,
 )
-from custom_components.linkplay.const import DOMAIN
+from custom_components.linkplay.const import DOMAIN, CONF_SOURCES
 
 # MockConfigEntry compatibility
 try:
@@ -718,6 +718,24 @@ class TestLinkplayOptionsFlow:
         assert result["title"] == ""
 
     @pytest.mark.asyncio
+    async def test_async_step_init_with_sources(self, hass: HomeAssistant):
+        """Test init step updates sources."""
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={CONF_HOST: "192.168.1.100"},
+        )
+        entry.add_to_hass(hass)
+
+        flow = LinkplayOptionsFlow(entry)
+        flow.hass = hass
+
+        user_input = {CONF_SOURCES: ["bluetooth", "line-in"]}
+        result = await flow.async_step_init(user_input=user_input)
+
+        assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+        assert result["data"][CONF_SOURCES] == ["bluetooth", "line-in"]
+
+    @pytest.mark.asyncio
     async def test_async_step_init_exception_handling(self, hass: HomeAssistant):
         """Test init step handles exceptions."""
         entry = MockConfigEntry(
@@ -732,5 +750,3 @@ class TestLinkplayOptionsFlow:
         with patch.object(flow, "async_show_form", side_effect=Exception("Test error")):
             with pytest.raises(Exception):
                 await flow.async_step_init()
-
-
