@@ -2364,7 +2364,7 @@ class LinkPlayDevice(MediaPlayerEntity):
                     await slave.async_set_media_artist(self._media_artist)
 #                    await slave.async_set_muted(self._muted)
                     await slave.async_set_state(self.state)
-                    await slave.async_set_slave_ip(slave['ip'])
+                    await slave.async_set_slave_ip(slave.host)
                     await slave.async_set_media_image_url(self._media_image_url)
                     await slave.async_set_playhead_position(self.media_position)
                     await slave.async_set_duration(self.media_duration)
