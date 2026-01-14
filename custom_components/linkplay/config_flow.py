@@ -21,6 +21,7 @@ from homeassistant.core import callback
 from homeassistant.helpers.service_info.ssdp import SsdpServiceInfo
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers import config_validation as cv
 
 from .const import (
     DOMAIN,
@@ -28,11 +29,13 @@ from .const import (
     CONF_MULTIROOM_WIFIDIRECT,
     CONF_LEDOFF,
     CONF_VOLUME_STEP,
+    CONF_SOURCES,
     DEFAULT_ICECAST_UPDATE,
     DEFAULT_MULTIROOM_WIFIDIRECT,
     DEFAULT_LEDOFF,
     DEFAULT_VOLUME_STEP,
     ICECAST_METADATA_MODES,
+    SOURCES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -342,6 +345,16 @@ class LinkplayOptionsFlow(config_entries.OptionsFlow):
             CONF_VOLUME_STEP,
             self.entry.data.get(CONF_VOLUME_STEP, DEFAULT_VOLUME_STEP)
         )
+        current_sources = self.entry.options.get(
+            CONF_SOURCES,
+            self.entry.data.get(CONF_SOURCES, [])
+        )
+
+        default_sources = current_sources
+        if not default_sources:
+             default_sources = list(SOURCES.keys())
+        elif isinstance(default_sources, list) and len(default_sources) > 0 and isinstance(default_sources[0], dict):
+             default_sources = list(default_sources[0].keys())
 
         schema = vol.Schema(
             {
@@ -357,6 +370,9 @@ class LinkplayOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_VOLUME_STEP, default=current_vol_step
                 ): vol.All(int, vol.Range(min=1, max=25)),
+                vol.Optional(
+                    CONF_SOURCES, default=default_sources
+                ): cv.multi_select(SOURCES),
             }
         )
 

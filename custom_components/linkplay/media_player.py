@@ -82,6 +82,11 @@ from .const import (
     DEFAULT_MULTIROOM_WIFIDIRECT,
     DEFAULT_LEDOFF,
     DEFAULT_VOLUME_STEP,
+    SOURCES,
+    SOURCES_MAP,
+    SOURCES_LIVEIN,
+    SOURCES_STREAM,
+    SOURCES_LOCALF,
     API_TIMEOUT,
 )
 
@@ -147,50 +152,6 @@ CUT_EXTENSIONS = ['mp3', 'mp2', 'm2a', 'mpg', 'wav', 'aac', 'flac', 'flc', 'm4a'
 
 SOUND_MODES = {'0': 'Normal', '1': 'Classic', '2': 'Pop', '3': 'Jazz', '4': 'Vocal'}
 
-SOURCES = {'bluetooth': 'Bluetooth', 
-           'line-in': 'Line-in', 
-           'line-in2': 'Line-in 2', 
-           'optical': 'Optical', 
-           'co-axial': 'Coaxial', 
-           'HDMI': 'HDMI', 
-           'udisk': 'USB disk', 
-           'TFcard': 'SD card', 
-           'RCA': 'RCA', 
-           'XLR': 'XLR', 
-           'FM': 'FM', 
-           'cd': 'CD',
-           'PCUSB': 'USB DAC'}
-
-SOURCES_MAP = {'-1': 'Idle', 
-               '0': 'Idle', 
-               '1': 'Airplay', 
-               '2': 'DLNA',
-               '3': 'QPlay',
-               '10': 'Network', 
-               '11': 'udisk', 
-               '16': 'TFcard',
-               '20': 'API', 
-               '21': 'udisk', 
-               '30': 'Alarm', 
-               '31': 'Spotify', 
-               '40': 'line-in', 
-               '41': 'bluetooth', 
-               '43': 'optical',
-               '44': 'RCA',
-               '45': 'co-axial',
-               '46': 'FM',
-               '47': 'line-in2', 
-               '48': 'XLR',
-               '49': 'HDMI',
-               '50': 'cd',
-               '51': 'USB DAC',
-               '52': 'TFcard',
-               '60': 'Talk',
-               '99': 'Idle'}
-
-SOURCES_LIVEIN = ['-1', '0', '40', '41', '43', '44', '45', '46', '47', '48', '49', '50', '51', '99']
-SOURCES_STREAM = ['1', '2', '3', '10', '30']
-SOURCES_LOCALF = ['11', '16', '20', '21', '52', '60']
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
@@ -397,8 +358,15 @@ class LinkPlayDevice(MediaPlayerEntity):
         self._fadevol = False
         self._source = None
         self._prev_source = None
-        if sources is not None and sources != {}:
-            self._source_list = loads(dumps(sources).strip('[]'))
+        if sources is not None and sources != {} and sources != []:
+            if isinstance(sources, list) and len(sources) > 0 and isinstance(sources[0], str):
+                # Option flow provided list of keys
+                self._source_list = {k: SOURCES[k] for k in sources if k in SOURCES}
+            else:
+                try:
+                    self._source_list = loads(dumps(sources).strip('[]'))
+                except Exception:
+                    self._source_list = SOURCES.copy()
         else:
             self._source_list = SOURCES.copy()
         if common_sources is not None and common_sources != {}:
