@@ -21,7 +21,6 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN, API_TIMEOUT
 
-DOMAIN = 'linkplay'
 PLATFORMS = [Platform.MEDIA_PLAYER]
 
 SERVICE_JOIN = 'join'
