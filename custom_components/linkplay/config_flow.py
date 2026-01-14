@@ -22,7 +22,18 @@ from homeassistant.helpers.service_info.ssdp import SsdpServiceInfo
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN
+from .const import (
+    DOMAIN,
+    CONF_ICECAST_METADATA,
+    CONF_MULTIROOM_WIFIDIRECT,
+    CONF_LEDOFF,
+    CONF_VOLUME_STEP,
+    DEFAULT_ICECAST_UPDATE,
+    DEFAULT_MULTIROOM_WIFIDIRECT,
+    DEFAULT_LEDOFF,
+    DEFAULT_VOLUME_STEP,
+    ICECAST_METADATA_MODES,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -311,19 +322,42 @@ class LinkplayOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle options flow."""
-        try:
-            if user_input is not None:
-                # Store any future options here
-                return self.async_create_entry(title="", data=user_input)
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
 
-            schema = vol.Schema({})
+        # Get current values or defaults
+        current_icecast = self.entry.options.get(
+            CONF_ICECAST_METADATA,
+            self.entry.data.get(CONF_ICECAST_METADATA, DEFAULT_ICECAST_UPDATE)
+        )
+        current_wifidirect = self.entry.options.get(
+            CONF_MULTIROOM_WIFIDIRECT,
+            self.entry.data.get(CONF_MULTIROOM_WIFIDIRECT, DEFAULT_MULTIROOM_WIFIDIRECT)
+        )
+        current_ledoff = self.entry.options.get(
+            CONF_LEDOFF,
+            self.entry.data.get(CONF_LEDOFF, DEFAULT_LEDOFF)
+        )
+        current_vol_step = self.entry.options.get(
+            CONF_VOLUME_STEP,
+            self.entry.data.get(CONF_VOLUME_STEP, DEFAULT_VOLUME_STEP)
+        )
 
-            return self.async_show_form(step_id="init", data_schema=schema)
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_ICECAST_METADATA, default=current_icecast
+                ): vol.In(ICECAST_METADATA_MODES),
+                vol.Optional(
+                    CONF_MULTIROOM_WIFIDIRECT, default=current_wifidirect
+                ): bool,
+                vol.Optional(
+                    CONF_LEDOFF, default=current_ledoff
+                ): bool,
+                vol.Optional(
+                    CONF_VOLUME_STEP, default=current_vol_step
+                ): vol.All(int, vol.Range(min=1, max=25)),
+            }
+        )
 
-        except Exception as err:
-            _LOGGER.exception("Error in options flow: %s", err)
-            return self.async_show_form(
-                step_id="init",
-                errors={"base": "unknown_error"},
-                data_schema=vol.Schema({}),
-            )
+        return self.async_show_form(step_id="init", data_schema=schema)
