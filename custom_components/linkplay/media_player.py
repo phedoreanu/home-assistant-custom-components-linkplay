@@ -69,7 +69,19 @@ from homeassistant.const import (
     STATE_UNAVAILABLE,
 )
 
-from . import DOMAIN, ATTR_MASTER
+from . import ATTR_MASTER
+from .const import (
+    DOMAIN,
+    CONF_ICECAST_METADATA,
+    CONF_MULTIROOM_WIFIDIRECT,
+    CONF_LEDOFF,
+    CONF_VOLUME_STEP,
+    CONF_SOURCES,
+    DEFAULT_ICECAST_UPDATE,
+    DEFAULT_MULTIROOM_WIFIDIRECT,
+    DEFAULT_LEDOFF,
+    DEFAULT_VOLUME_STEP,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -95,18 +107,18 @@ ATTR_DEBUG = 'debug_info'
 
 CONF_NAME = 'name'
 CONF_LASTFM_API_KEY = 'lastfm_api_key'
-CONF_SOURCES = 'sources'
+# CONF_SOURCES = 'sources'
 CONF_COMMONSOURCES = 'common_sources'
-CONF_ICECAST_METADATA = 'icecast_metadata'
-CONF_MULTIROOM_WIFIDIRECT = 'multiroom_wifidirect'
-CONF_VOLUME_STEP = 'volume_step'
-CONF_LEDOFF = 'led_off'
+# CONF_ICECAST_METADATA = 'icecast_metadata'
+# CONF_MULTIROOM_WIFIDIRECT = 'multiroom_wifidirect'
+# CONF_VOLUME_STEP = 'volume_step'
+# CONF_LEDOFF = 'led_off'
 CONF_UUID = 'uuid'
 
-DEFAULT_ICECAST_UPDATE = 'StationName'
-DEFAULT_MULTIROOM_WIFIDIRECT = False
-DEFAULT_LEDOFF = False
-DEFAULT_VOLUME_STEP = 5
+# DEFAULT_ICECAST_UPDATE = 'StationName'
+# DEFAULT_MULTIROOM_WIFIDIRECT = False
+# DEFAULT_LEDOFF = False
+# DEFAULT_VOLUME_STEP = 5
 
 DEBUGSTR_ATTR = True
 LASTFM_API_BASE = 'http://ws.audioscrobbler.com/2.0/?method='
@@ -297,14 +309,26 @@ async def async_setup_entry(hass, entry, async_add_entities):
     name = entry.data.get(CONF_NAME, f"Linkplay Device ({host})")
     protocol = entry.data.get(CONF_PROTOCOL, "http")
 
-    # Use defaults for options that aren't in config flow
-    sources = None
-    common_sources = None
-    icecast_metadata = DEFAULT_ICECAST_UPDATE
-    multiroom_wifidirect = DEFAULT_MULTIROOM_WIFIDIRECT
-    led_off = DEFAULT_LEDOFF
-    volume_step = DEFAULT_VOLUME_STEP
-    lastfm_api_key = None
+    # Get options from config entry
+    sources = entry.data.get(CONF_SOURCES)
+    common_sources = entry.data.get(CONF_COMMONSOURCES)
+    icecast_metadata = entry.options.get(
+        CONF_ICECAST_METADATA,
+        entry.data.get(CONF_ICECAST_METADATA, DEFAULT_ICECAST_UPDATE)
+    )
+    multiroom_wifidirect = entry.options.get(
+        CONF_MULTIROOM_WIFIDIRECT,
+        entry.data.get(CONF_MULTIROOM_WIFIDIRECT, DEFAULT_MULTIROOM_WIFIDIRECT)
+    )
+    led_off = entry.options.get(
+        CONF_LEDOFF,
+        entry.data.get(CONF_LEDOFF, DEFAULT_LEDOFF)
+    )
+    volume_step = entry.options.get(
+        CONF_VOLUME_STEP,
+        entry.data.get(CONF_VOLUME_STEP, DEFAULT_VOLUME_STEP)
+    )
+    lastfm_api_key = entry.data.get(CONF_LASTFM_API_KEY)
     uuid = entry.unique_id or ""
 
     state = STATE_IDLE

@@ -51,7 +51,13 @@
     "step": {
       "init": {
         "title": "Linkplay Options",
-        "description": "Configure options for your Linkplay device"
+        "description": "Configure options for your Linkplay device",
+        "data": {
+          "icecast_metadata": "Icecast Metadata Mode",
+          "multiroom_wifidirect": "Enable Multiroom Wifi Direct",
+          "led_off": "Turn Off LED",
+          "volume_step": "Volume Step Size (1-25)"
+        }
       }
     }
   }
