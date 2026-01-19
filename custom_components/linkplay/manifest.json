@@ -1,7 +1,7 @@
 {
   "domain": "linkplay",
   "name": "Linkplay",
-  "version": "4.0.0-beta.1",
+  "version": "4.0.0",
   "documentation": "https://github.com/phedoreanu/home-assistant-custom-components-linkplay",
   "issue_tracker": "https://github.com/phedoreanu/home-assistant-custom-components-linkplay/issues",
   "after_dependencies": ["http", "tts", "media_source"],
