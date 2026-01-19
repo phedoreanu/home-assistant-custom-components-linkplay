@@ -1,4 +1,4 @@
-# Linkplay-based speakers and sound devices - [v4.0.0](https://github.com/phedoreanu/home-assistant-custom-components-linkplay/releases/tag/4.0.0)
+# Linkplay-based speakers and sound devices - [v4.0.0](https://github.com/phedoreanu/home-assistant-custom-components-linkplay/releases/tag/v4.0.0)
 
 This component allows you to integrate control of audio devices based on Linkplay A31 chipset into your [Home Assistant](http://www.home-assistant.io) smart home system. 
 Originally developed by nicjo814, maintained by limych, archived by nagyrobi, and now maintained by phedoreanu.
