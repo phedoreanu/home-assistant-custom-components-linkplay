@@ -201,6 +201,43 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             volume = service.data.get(ATTR_VOLUME)
             volume_offsets = service.data.get(ATTR_VOLUME_OFFSETS, {})
 
+            # Convert percentage-style offsets (integers) to fractional offsets (floats)
+            # Percentages are in range -100 to 100 and are given as integers.
+            # Fractional offsets are in range -1.0 to 1.0 and are given as floats.
+            # Note: Percentages represent percentage points (e.g., 10 = +0.10), not multipliers.
+            converted_offsets = {}
+            for entity_id, offset in volume_offsets.items():
+                # If offset is an integer, interpret it as a percentage and convert to fractional
+                if isinstance(offset, int):
+                    # Validate percentage range
+                    if offset < -100 or offset > 100:
+                        _LOGGER.error(
+                            "Invalid volume offset percentage %s for entity %s; expected -100 to 100",
+                            offset,
+                            entity_id,
+                        )
+                        raise ValueError(
+                            f"Invalid volume offset percentage {offset} for entity {entity_id}; "
+                            "expected value between -100 and 100."
+                        )
+                    converted_offsets[entity_id] = offset / 100.0
+                elif isinstance(offset, float):
+                    # Already in fractional format; validate expected range -1.0 to 1.0
+                    if offset < -1.0 or offset > 1.0:
+                        _LOGGER.error(
+                            "Invalid fractional volume offset %s for entity %s; expected -1.0 to 1.0",
+                            offset,
+                            entity_id,
+                        )
+                        raise ValueError(
+                            f"Invalid fractional volume offset {offset} for entity {entity_id}; "
+                            "expected value between -1.0 and 1.0."
+                        )
+                    converted_offsets[entity_id] = offset
+                else:
+                    # Preserve any other types as-is
+                    converted_offsets[entity_id] = offset
+
             # Find the master device from the entity_ids
             master_device = None
             for device in entities:
@@ -210,12 +247,13 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
             if master_device:
                 _LOGGER.debug(
-                    "**SET GROUP VOLUME** master: %s; volume: %s; offsets: %s",
+                    "**SET GROUP VOLUME** master: %s; volume: %s; offsets: %s (converted: %s)",
                     master_device.entity_id,
                     volume,
-                    volume_offsets
+                    volume_offsets,
+                    converted_offsets
                 )
-                await master_device.async_set_group_volume(volume, volume_offsets)
+                await master_device.async_set_group_volume(volume, converted_offsets)
 
     # Register all services
     hass.services.async_register(
