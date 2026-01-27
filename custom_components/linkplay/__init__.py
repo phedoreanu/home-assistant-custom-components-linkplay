@@ -74,7 +74,9 @@ PLYTRK_SERVICE_SCHEMA = vol.Schema({
 SET_GROUP_VOLUME_SCHEMA = vol.Schema({
     vol.Required(ATTR_ENTITY_ID): cv.entity_id,
     vol.Required(ATTR_VOLUME): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
-    vol.Optional(ATTR_VOLUME_OFFSETS): dict,
+    vol.Optional(ATTR_VOLUME_OFFSETS): vol.Schema({
+        cv.entity_id: vol.All(vol.Coerce(int), vol.Range(min=-50, max=50)),
+    }),
 })
 
 _LOGGER = logging.getLogger(__name__)
@@ -223,7 +225,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                                 # Store the offset
                                 await device.async_set_volume_offset(offset)
 
-                                # Calculate target volume (0-100 range)
+                                # Calculate target volume (normalized 0.0–1.0 range)
                                 target_volume = max(0, min(1, volume + (offset / 100)))
 
                                 _LOGGER.debug("**SET_GROUP_VOLUME** agent: %s, offset: %s, target: %s",

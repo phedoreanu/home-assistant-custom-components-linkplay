@@ -93,7 +93,6 @@ ICON_BLUETOOTH = 'mdi:speaker-bluetooth'
 ICON_PUSHSTREAM = 'mdi:cast-audio'
 ICON_TTS = 'mdi:speaker-message'
 
-ATTR_MAIN = 'main'
 ATTR_AGENT = 'agent'
 ATTR_LINKPLAY_GROUP = 'linkplay_group'
 ATTR_FWVER = 'firmware'
@@ -981,7 +980,7 @@ class LinkPlayDevice(MediaPlayerEntity):
 
         # Get multiroom agent information #
 
-        agent_list = await self.call_linkplay_httpapi("multiroom:getAgentList", True)
+        agent_list = await self.call_linkplay_httpapi("multiroom:getSlaveList", True)
         if agent_list is None:
             self._is_main = False
             self._agent_list = None
@@ -991,10 +990,10 @@ class LinkPlayDevice(MediaPlayerEntity):
         self._agent_list = []
         self._multiroom_group = []
         if isinstance(agent_list, dict):
-            if int(agent_list['agents']) > 0:
+            if int(agent_list['slaves']) > 0:
                 self._multiroom_group.append(self.entity_id)
                 self._is_main = True
-                for agent in agent_list['agent_list']:
+                for agent in agent_list['slave_list']:
                     for device in self.hass.data[DOMAIN].entities:
                         if device._name == agent['name']:
                             self._multiroom_group.append(device.entity_id)
@@ -1015,10 +1014,9 @@ class LinkPlayDevice(MediaPlayerEntity):
                             await device.async_set_sound_mode(self._sound_mode)
                             await device.async_set_features(self._features)
 
-                    for agent in agent_list['agent_list']:
-                        for device in self.hass.data[DOMAIN].entities:
-                            if device.entity_id in self._multiroom_group:
-                                await device.async_set_multiroom_group(self._multiroom_group)
+                for device in self.hass.data[DOMAIN].entities:
+                    if device.entity_id in self._multiroom_group:
+                        await device.async_set_multiroom_group(self._multiroom_group)
 
         else:
             _LOGGER.debug("Erroneous JSON during agent list parsing and processing: %s, %s", self.entity_id, self._name)
@@ -2293,7 +2291,15 @@ class LinkPlayDevice(MediaPlayerEntity):
 
     async def async_set_volume_offset(self, offset):
         """Set the volume offset for this device in a multiroom group."""
-        self._volume_offset = max(-50, min(50, int(offset)))  # Clamp between -50 and +50
+        try:
+            value = int(offset)
+        except (TypeError, ValueError):
+            _LOGGER.error(
+                "Invalid volume offset %r received; expected an integer between -50 and 50",
+                offset,
+            )
+            return
+        self._volume_offset = max(-50, min(50, value))  # Clamp between -50 and +50
 
     async def async_set_previous_source(self, srcbool):
         """Memorize what was the previous source before entering multiroom."""
@@ -2417,10 +2423,10 @@ class LinkPlayDevice(MediaPlayerEntity):
                 await agent.async_set_previous_source(True)
                 if self._multiroom_wifidirect:
                     _LOGGER.debug("Multiroom: Join in WiFi direct mode. Main: %s, Agent: %s", self.entity_id, agent.entity_id)
-                    cmd = "ConnectMainAp:ssid={0}:ch={1}:auth=OPEN:".format(self._ssid, self._wifi_channel) + "encry=NONE:pwd=:chext=0"
+                    cmd = "ConnectMasterAp:ssid={0}:ch={1}:auth=OPEN:".format(self._ssid, self._wifi_channel) + "encry=NONE:pwd=:chext=0"
                 else:
                     _LOGGER.debug("Multiroom: Join in multiroom mode. Main: %s, Agent: %s", self.entity_id, agent.entity_id)
-                    cmd = 'ConnectMainAp:JoinGroupMain:eth{0}:wifi0.0.0.0'.format(self._host)
+                    cmd = 'ConnectMasterAp:JoinGroupMaster:eth{0}:wifi0.0.0.0'.format(self._host)
 
                 value = await agent.call_linkplay_httpapi(cmd, None)
 
@@ -2484,7 +2490,7 @@ class LinkPlayDevice(MediaPlayerEntity):
 
     async def async_unjoin_player(self):
         """Remove this player from any group (standard HA)."""
-        if self._is_master:
+        if self._is_main:
             await self.async_unjoin_all()
 
         if self._agent_mode:
@@ -2496,7 +2502,7 @@ class LinkPlayDevice(MediaPlayerEntity):
             for dev in self._multiroom_group:
                 for device in self.hass.data[DOMAIN].entities:
                     if device._is_main:    ## TODO!!!
-                        cmd = "multiroom:AgentKickout:{0}".format(self._agent_ip)
+                        cmd = "multiroom:SlaveKickout:{0}".format(self._agent_ip)
                         value = await self._main.call_linkplay_httpapi(cmd, None)
                         self._main._position_updated_at = utcnow()
 
@@ -2529,7 +2535,6 @@ class LinkPlayDevice(MediaPlayerEntity):
         if len(self._multiroom_group) <= 1:
             self._multiroom_group = []
             self._is_main = False
-            self._agent_list = None
             self._agent_list = None
 
         for member in self._multiroom_group:
