@@ -2507,6 +2507,49 @@ class LinkPlayDevice(MediaPlayerEntity):
         else:
             _LOGGER.warning("Failed to unjoin_me from multiroom. " "Device: %s, Got response: %s", self.entity_id, value)
 
+    async def async_set_group_volume(self, volume: float, volume_offsets: dict[str, float] | None = None):
+        """Set volume for all speakers in the multiroom group with optional offsets.
+
+        Args:
+            volume: Base volume level (0.0 to 1.0) to set for all speakers
+            volume_offsets: Optional dict of entity_id to volume offset (-1.0 to 1.0)
+        """
+        if not volume_offsets:
+            volume_offsets = {}
+
+        _LOGGER.debug(
+            "Setting group volume: master=%s, base_volume=%.2f, offsets=%s, group=%s",
+            self.entity_id,
+            volume,
+            volume_offsets,
+            self._multiroom_group
+        )
+
+        # Get all entities in the group
+        group_entities = []
+        for entity_id in self._multiroom_group:
+            for device in self.hass.data[DOMAIN].entities:
+                if device.entity_id == entity_id:
+                    group_entities.append(device)
+                    break
+
+        # Set volume for each speaker in the group
+        for device in group_entities:
+            # Calculate the final volume with offset
+            offset = volume_offsets.get(device.entity_id, 0.0)
+            final_volume = max(0.0, min(1.0, volume + offset))
+
+            _LOGGER.debug(
+                "Setting volume for %s: base=%.2f, offset=%.2f, final=%.2f",
+                device.entity_id,
+                volume,
+                offset,
+                final_volume
+            )
+
+            # Set the volume on the device
+            await device.async_set_volume_level(final_volume)
+
     async def async_remove_from_group(self, device):
         """Remove a certain device for multiroom lists."""
         if device.entity_id in self._multiroom_group:
