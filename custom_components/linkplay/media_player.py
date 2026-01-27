@@ -1015,7 +1015,7 @@ class LinkPlayDevice(MediaPlayerEntity):
                             await device.async_set_sound_mode(self._sound_mode)
                             await device.async_set_features(self._features)
 
-                    for agent in agent_list['agent_list']:
+                    for unused_agent in agent_list['agent_list']:
                         for device in self.hass.data[DOMAIN].entities:
                             if device.entity_id in self._multiroom_group:
                                 await device.async_set_multiroom_group(self._multiroom_group)
