@@ -264,7 +264,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             # Find the master device from the entity_ids
             master_device = None
             for device in entities:
-                if device.entity_id in entity_ids:
+                if device.entity_id == entity_ids:
                     master_device = device
                     break
 
