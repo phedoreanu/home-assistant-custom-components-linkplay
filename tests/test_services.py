@@ -391,3 +391,26 @@ class TestLinkplaySetGroupVolumeService:
         assert called_offsets[0] == {"media_player.kitchen": 0.15}
         slave1.async_set_volume_level.assert_called_with(0.65)  # 0.5 + 0.15
 
+        # Reset
+        called_offsets.clear()
+        master.async_set_volume_level.reset_mock()
+        slave1.async_set_volume_level.reset_mock()
+
+        # Test edge case: 1.0 should be treated as 1% (0.01) not as fractional
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_GROUP_VOLUME,
+            {
+                ATTR_ENTITY_ID: "media_player.living_room",
+                ATTR_VOLUME: 0.5,
+                ATTR_VOLUME_OFFSETS: {
+                    "media_player.kitchen": 1.0,  # 1% = 0.01
+                },
+            },
+            blocking=True,
+        )
+
+        # Verify 1.0 was converted to 0.01
+        assert called_offsets[0] == {"media_player.kitchen": 0.01}
+        slave1.async_set_volume_level.assert_called_with(0.51)  # 0.5 + 0.01
+

@@ -205,8 +205,8 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             # Percentages are in range -100 to 100, fractional are -1.0 to 1.0
             converted_offsets = {}
             for entity_id, offset in volume_offsets.items():
-                # If offset is an integer or looks like a percentage (> 1 or < -1), convert it
-                if isinstance(offset, int) or (isinstance(offset, float) and (abs(offset) > 1.0)):
+                # If offset is an integer or looks like a percentage (>= 1 or <= -1), convert it
+                if isinstance(offset, int) or (isinstance(offset, float) and (abs(offset) >= 1.0)):
                     converted_offsets[entity_id] = offset / 100.0
                 else:
                     # Already in fractional format
