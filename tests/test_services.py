@@ -194,7 +194,7 @@ class TestLinkplaySetGroupVolumeService:
 
         # Verify the service was called correctly
         assert called_volumes[0] == 0.5
-        # The offsets should be converted from percentages to fractional
+        # The percentage offsets (-10 and 20) must be normalized to fractional values (-0.1 and 0.2)
         assert called_offsets[0] == {
             "media_player.kitchen": -0.1,
             "media_player.bedroom": 0.2,
@@ -396,7 +396,7 @@ class TestLinkplaySetGroupVolumeService:
         master.async_set_volume_level.reset_mock()
         slave1.async_set_volume_level.reset_mock()
 
-        # Test edge case: 1.0 should be treated as 1% (0.01) not as fractional
+        # Test edge case: 1.0 is now treated as fractional (maximum offset), not as 1%
         await hass.services.async_call(
             DOMAIN,
             SERVICE_SET_GROUP_VOLUME,
@@ -404,13 +404,134 @@ class TestLinkplaySetGroupVolumeService:
                 ATTR_ENTITY_ID: "media_player.living_room",
                 ATTR_VOLUME: 0.5,
                 ATTR_VOLUME_OFFSETS: {
-                    "media_player.kitchen": 1.0,  # 1% = 0.01
+                    "media_player.kitchen": 1.0,  # Fractional: full +100% offset
                 },
             },
             blocking=True,
         )
 
-        # Verify 1.0 was converted to 0.01
-        assert called_offsets[0] == {"media_player.kitchen": 0.01}
-        slave1.async_set_volume_level.assert_called_with(0.51)  # 0.5 + 0.01
+        # Verify 1.0 was preserved as fractional (clamped to max volume 1.0 by device)
+        assert called_offsets[0] == {"media_player.kitchen": 1.0}
+        slave1.async_set_volume_level.assert_called_with(1.0)  # 0.5 + 1.0 clamped to 1.0
+
+        # Reset
+        called_offsets.clear()
+        master.async_set_volume_level.reset_mock()
+        slave1.async_set_volume_level.reset_mock()
+
+        # Test edge case: -1.0 is also treated as fractional (minimum offset)
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_GROUP_VOLUME,
+            {
+                ATTR_ENTITY_ID: "media_player.living_room",
+                ATTR_VOLUME: 0.5,
+                ATTR_VOLUME_OFFSETS: {
+                    "media_player.kitchen": -1.0,  # Fractional: full -100% offset
+                },
+            },
+            blocking=True,
+        )
+
+        # Verify -1.0 was preserved as fractional (clamped to min volume 0.0 by device)
+        assert called_offsets[0] == {"media_player.kitchen": -1.0}
+        slave1.async_set_volume_level.assert_called_with(0.0)  # 0.5 - 1.0 clamped to 0.0
+
+    @pytest.mark.asyncio
+    async def test_set_group_volume_invalid_percentage_range(self, hass: HomeAssistant, mock_linkplay_data):
+        """Test that out-of-range percentage values are rejected."""
+        # Create mock devices
+        master = MockLinkplayDevice("media_player.living_room", hass)
+        master._is_master = True
+        master._multiroom_group = ["media_player.living_room", "media_player.kitchen"]
+
+        slave1 = MockLinkplayDevice("media_player.kitchen", hass)
+        slave1._slave_mode = True
+
+        # Setup the LinkPlay data
+        mock_linkplay_data.entities = [master, slave1]
+        hass.data[DOMAIN] = mock_linkplay_data
+
+        # Register the service
+        from custom_components.linkplay import async_setup_services
+        await async_setup_services(hass)
+
+        # Test with percentage value exceeding maximum (150 > 100)
+        with pytest.raises(ValueError, match="expected value between -100 and 100"):
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_SET_GROUP_VOLUME,
+                {
+                    ATTR_ENTITY_ID: "media_player.living_room",
+                    ATTR_VOLUME: 0.5,
+                    ATTR_VOLUME_OFFSETS: {
+                        "media_player.kitchen": 150,  # Out of range
+                    },
+                },
+                blocking=True,
+            )
+
+        # Test with percentage value below minimum (-200 < -100)
+        with pytest.raises(ValueError, match="expected value between -100 and 100"):
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_SET_GROUP_VOLUME,
+                {
+                    ATTR_ENTITY_ID: "media_player.living_room",
+                    ATTR_VOLUME: 0.5,
+                    ATTR_VOLUME_OFFSETS: {
+                        "media_player.kitchen": -200,  # Out of range
+                    },
+                },
+                blocking=True,
+            )
+
+    @pytest.mark.asyncio
+    async def test_set_group_volume_invalid_fractional_range(self, hass: HomeAssistant, mock_linkplay_data):
+        """Test that out-of-range fractional values are rejected."""
+        # Create mock devices
+        master = MockLinkplayDevice("media_player.living_room", hass)
+        master._is_master = True
+        master._multiroom_group = ["media_player.living_room", "media_player.kitchen"]
+
+        slave1 = MockLinkplayDevice("media_player.kitchen", hass)
+        slave1._slave_mode = True
+
+        # Setup the LinkPlay data
+        mock_linkplay_data.entities = [master, slave1]
+        hass.data[DOMAIN] = mock_linkplay_data
+
+        # Register the service
+        from custom_components.linkplay import async_setup_services
+        await async_setup_services(hass)
+
+        # Test with fractional value exceeding maximum (1.5 > 1.0)
+        with pytest.raises(ValueError, match="expected value between -1.0 and 1.0"):
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_SET_GROUP_VOLUME,
+                {
+                    ATTR_ENTITY_ID: "media_player.living_room",
+                    ATTR_VOLUME: 0.5,
+                    ATTR_VOLUME_OFFSETS: {
+                        "media_player.kitchen": 1.5,  # Out of range
+                    },
+                },
+                blocking=True,
+            )
+
+        # Test with fractional value below minimum (-1.5 < -1.0)
+        with pytest.raises(ValueError, match="expected value between -1.0 and 1.0"):
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_SET_GROUP_VOLUME,
+                {
+                    ATTR_ENTITY_ID: "media_player.living_room",
+                    ATTR_VOLUME: 0.5,
+                    ATTR_VOLUME_OFFSETS: {
+                        "media_player.kitchen": -1.5,  # Out of range
+                    },
+                },
+                blocking=True,
+            )
 
