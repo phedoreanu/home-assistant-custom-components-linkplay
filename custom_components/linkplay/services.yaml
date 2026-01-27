@@ -153,8 +153,8 @@ set_group_volume:
   description: Set volume for all speakers in a multiroom group with optional individual offsets for each speaker.
   fields:
     entity_id:
-      name: Master Entity ID
-      description: Entity ID of the master speaker in the multiroom group.
+      name: Entity ID
+      description: Entity ID of any speaker in the multiroom group (master or member).
       example: media_player.sound_room1
       required: true
       selector:
