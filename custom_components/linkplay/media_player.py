@@ -2483,7 +2483,7 @@ class LinkPlayDevice(MediaPlayerEntity):
 
     async def async_unjoin_player(self):
         """Remove this player from any group (standard HA)."""
-        if self._is_master:
+        if self._is_main:
             await self.async_unjoin_all()
 
         if self._agent_mode:
