@@ -246,8 +246,8 @@ script:
 
 - Volume offsets range from -50 to +50 percentage points
 - The final volume for each device is clamped between 0.0 and 1.0
-- Offsets are persistent within the session and shown in device attributes
-- Only works when the entity_id is a main device in an active multiroom group
+- Offsets are applied only for the current service call; they are not persisted or exposed as device attributes
+- The service can be called on any member of an active multiroom group; the `entity_id` is used as the reference device for the base group volume
 
 
 ## Presets
