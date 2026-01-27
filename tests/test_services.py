@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -13,30 +13,7 @@ from custom_components.linkplay import (
     ATTR_VOLUME,
     ATTR_VOLUME_OFFSETS,
 )
-from custom_components.linkplay.const import CONF_ICECAST_METADATA
 from homeassistant.const import ATTR_ENTITY_ID
-
-# MockConfigEntry compatibility
-try:
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
-except ImportError:
-    try:
-        from homeassistant.test.common import MockConfigEntry
-    except ImportError:
-        # Fallback for older Home Assistant versions
-        class MockConfigEntry:  # type: ignore
-            """Mock config entry."""
-            def __init__(self, domain, data, title=None, unique_id=None):
-                self.domain = domain
-                self.data = data
-                self.title = title or "Mock Entry"
-                self.unique_id = unique_id
-                self.options = {}
-                self.entry_id = "test_entry_id"
-
-            def add_to_hass(self, hass):
-                """Add to hass."""
-                pass
 
 
 class MockLinkplayDevice:
@@ -534,4 +511,54 @@ class TestLinkplaySetGroupVolumeService:
                 },
                 blocking=True,
             )
+
+    @pytest.mark.asyncio
+    async def test_set_group_volume_invalid_offset_type(self, hass: HomeAssistant, mock_linkplay_data):
+        """Test that unsupported offset types are rejected with a clear error."""
+        # Create mock devices
+        master = MockLinkplayDevice("media_player.living_room", hass)
+        master._is_master = True
+        master._multiroom_group = ["media_player.living_room", "media_player.kitchen"]
+
+        slave1 = MockLinkplayDevice("media_player.kitchen", hass)
+        slave1._slave_mode = True
+
+        # Setup the LinkPlay data
+        mock_linkplay_data.entities = [master, slave1]
+        hass.data[DOMAIN] = mock_linkplay_data
+
+        # Register the service
+        from custom_components.linkplay import async_setup_services
+        await async_setup_services(hass)
+
+        # Test with invalid type (string instead of int/float)
+        with pytest.raises(ValueError, match="Invalid type str for volume offset.*expected int \\(percentage\\) or float \\(fractional\\)"):
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_SET_GROUP_VOLUME,
+                {
+                    ATTR_ENTITY_ID: "media_player.living_room",
+                    ATTR_VOLUME: 0.5,
+                    ATTR_VOLUME_OFFSETS: {
+                        "media_player.kitchen": "invalid",  # String is not supported
+                    },
+                },
+                blocking=True,
+            )
+
+        # Test with invalid type (list instead of int/float)
+        with pytest.raises(ValueError, match="Invalid type list for volume offset.*expected int \\(percentage\\) or float \\(fractional\\)"):
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_SET_GROUP_VOLUME,
+                {
+                    ATTR_ENTITY_ID: "media_player.living_room",
+                    ATTR_VOLUME: 0.5,
+                    ATTR_VOLUME_OFFSETS: {
+                        "media_player.kitchen": [0.5],  # List is not supported
+                    },
+                },
+                blocking=True,
+            )
+
 

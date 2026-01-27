@@ -235,8 +235,19 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                         )
                     converted_offsets[entity_id] = offset
                 else:
-                    # Preserve any other types as-is
-                    converted_offsets[entity_id] = offset
+                    # Reject unsupported types with a clear error
+                    _LOGGER.error(
+                        "Invalid type %s for volume offset %s for entity %s; "
+                        "expected int (percentage) or float (fractional).",
+                        type(offset).__name__,
+                        offset,
+                        entity_id,
+                    )
+                    raise ValueError(
+                        f"Invalid type {type(offset).__name__} for volume offset "
+                        f"{offset} for entity {entity_id}; expected int (percentage) "
+                        "or float (fractional)."
+                    )
 
             # Find the master device from the entity_ids
             master_device = None
