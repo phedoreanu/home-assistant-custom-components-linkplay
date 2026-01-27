@@ -2,17 +2,17 @@ join:
   name: Join
   description: Group players together in a multiroom setup.
   fields:
-    master:
-      name: Master Entity ID
-      description: Entity ID of the player that should become the master of the group.
+    main:
+      name: Main Entity ID
+      description: Entity ID of the player that should become the main of the group.
       example: media_player.sound_room2
       required: true
       selector:
         entity:
           integration: linkplay
     entity_id:
-      name: Slave Entity ID
-      description: Entity ID(s) of the player(s) that will connect to the master. Switch to YAML mode to manually add more, separated by comma.
+      name: Agent Entity ID
+      description: Entity ID(s) of the player(s) that will connect to the main. Switch to YAML mode to manually add more, separated by comma.
       example: media_player.sound_room1
       required: true
       selector:
@@ -25,7 +25,7 @@ unjoin:
   fields:
     entity_id:
       name: Entity ID
-      description: Entity ID(s) of the player(s) that will be unjoined from the group. If this is a master, all slaves will be unjoined.
+      description: Entity ID(s) of the player(s) that will be unjoined from the group. If this is a main, all agents will be unjoined.
       example: media_player.sound_room2
       required: true
       selector:
@@ -147,3 +147,37 @@ play_track:
       required: true
       selector:
         text:
+
+set_group_volume:
+  name: Set Group Volume
+  description: Set volume for a multiroom group with configurable offset for each connected speaker.
+  fields:
+    entity_id:
+      name: Main Entity ID
+      description: Entity ID of the main player in the multiroom group.
+      example: media_player.sound_room1
+      required: true
+      selector:
+        entity:
+          integration: linkplay
+    volume:
+      name: Volume Level
+      description: Target volume level for the main device (0.0 to 1.0).
+      example: 0.5
+      required: true
+      default: 0.5
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 0.01
+          mode: slider
+    volume_offsets:
+      name: Volume Offsets
+      description: 'Dictionary of entity_id: offset pairs for agent devices. Offset is in percentage points (-50 to +50). Example: {"media_player.sound_room2": 10, "media_player.sound_room3": -5}. Switch to YAML mode to configure.'
+      example: '{"media_player.sound_room2": 10}'
+      required: false
+      selector:
+        object:
+
+

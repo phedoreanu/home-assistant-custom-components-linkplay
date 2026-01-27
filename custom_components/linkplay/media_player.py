@@ -69,7 +69,7 @@ from homeassistant.const import (
     STATE_UNAVAILABLE,
 )
 
-from . import ATTR_MASTER
+from . import ATTR_MAIN
 from .const import (
     DOMAIN,
     CONF_ICECAST_METADATA,
@@ -93,7 +93,8 @@ ICON_BLUETOOTH = 'mdi:speaker-bluetooth'
 ICON_PUSHSTREAM = 'mdi:cast-audio'
 ICON_TTS = 'mdi:speaker-message'
 
-ATTR_SLAVE = 'slave'
+ATTR_MAIN = 'main'
+ATTR_AGENT = 'agent'
 ATTR_LINKPLAY_GROUP = 'linkplay_group'
 ATTR_FWVER = 'firmware'
 ATTR_TRCNT = 'tracks_local'
@@ -453,12 +454,12 @@ class LinkPlayDevice(MediaPlayerEntity):
         self._player_statdata = {}
         self._lastfm_api_key = lastfm_api_key
         self._first_update = True
-        self._slave_mode = False
-        self._slave_ip = None
+        self._agent_mode = False
+        self._agent_ip = None
         self._trackq = []
         self._trackc = None
-        self._master = None
-        self._is_master = False
+        self._main = None
+        self._is_main = False
         self._wifi_channel = None
         self._ssid = None
         self._playing_localfile = True
@@ -468,7 +469,8 @@ class LinkPlayDevice(MediaPlayerEntity):
         self._playing_webplaylist = False
         self._playing_tts = False
         self._playing_mediabrowser = False
-        self._slave_list = None
+        self._agent_list = None
+        self._volume_offset = 0
         self._multiroom_wifidirect = multiroom_wifidirect
         self._multiroom_group = []
         self._multiroom_prevsrc = None
@@ -622,8 +624,8 @@ class LinkPlayDevice(MediaPlayerEntity):
             self._source = None
             self._upnp_device = None
             self._first_update = True
-            self._slave_mode = False
-            self._is_master = False
+            self._agent_mode = False
+            self._is_main = False
             self._player_statdata = None
             return
         self._player_statdata = resp.copy()
@@ -647,10 +649,10 @@ class LinkPlayDevice(MediaPlayerEntity):
                     return False
 
         #_LOGGER.debug("01 Start update %s, %s", self.entity_id, self._name)
-        if self._master is None:
-            self._slave_mode = False
+        if self._main is None:
+            self._agent_mode = False
 
-        if self._slave_mode: # or self._snapshot_active:
+        if self._agent_mode: # or self._snapshot_active:
             return True
 
         if self._multiroom_unjoinat is not None:
@@ -763,16 +765,16 @@ class LinkPlayDevice(MediaPlayerEntity):
             self._position_updated_at = utcnow()
 
             if self._player_statdata['type'] == '0':
-                self._slave_mode = False
+                self._agent_mode = False
 
             if self._multiroom_group == []:
-                self._slave_mode = False
-                self._is_master = False
-                self._master = None
+                self._agent_mode = False
+                self._is_main = False
+                self._main = None
 
             # TODO: https://github.com/phedoreanu/home-assistant-custom-components-linkplay/compare/master...akloeckner:home-assistant-custom-components-linkplay:dev
-            if not self._is_master:
-                self._master = None
+            if not self._is_main:
+                self._main = None
                 self._multiroom_group = []
 
             #_LOGGER.debug("04 Update VOL, Shuffle, Repeat, STATE %s, %s", self.entity_id, self._name)
@@ -977,34 +979,34 @@ class LinkPlayDevice(MediaPlayerEntity):
             _LOGGER.error("Erroneous JSON during update and process self._player_statdata: %s, %s", self.entity_id, self._name)
 
 
-        # Get multiroom slave information #
-        
-        slave_list = await self.call_linkplay_httpapi("multiroom:getSlaveList", True)
-        if slave_list is None:
-            self._is_master = False
-            self._slave_list = None
+        # Get multiroom agent information #
+
+        agent_list = await self.call_linkplay_httpapi("multiroom:getAgentList", True)
+        if agent_list is None:
+            self._is_main = False
+            self._agent_list = None
             self._multiroom_group = []
             return True
 
-        self._slave_list = []
+        self._agent_list = []
         self._multiroom_group = []
-        if isinstance(slave_list, dict):
-            if int(slave_list['slaves']) > 0:
+        if isinstance(agent_list, dict):
+            if int(agent_list['agents']) > 0:
                 self._multiroom_group.append(self.entity_id)
-                self._is_master = True
-                for slave in slave_list['slave_list']:
+                self._is_main = True
+                for agent in agent_list['agent_list']:
                     for device in self.hass.data[DOMAIN].entities:
-                        if device._name == slave['name']:
+                        if device._name == agent['name']:
                             self._multiroom_group.append(device.entity_id)
-                            await device.async_set_master(self)
-                            await device.async_set_is_master(False)
-                            await device.async_set_slave_mode(True)
+                            await device.async_set_main(self)
+                            await device.async_set_is_main(False)
+                            await device.async_set_agent_mode(True)
                             await device.async_set_media_title(self._media_title)
                             await device.async_set_media_artist(self._media_artist)
-                            await device.async_set_volume(slave['volume'])
-                            #await device.async_set_muted(slave['mute'])
+                            await device.async_set_volume(agent['volume'])
+                            #await device.async_set_muted(agent['mute'])
                             await device.async_set_state(self.state)
-                            await device.async_set_slave_ip(slave['ip'])
+                            await device.async_set_agent_ip(agent['ip'])
                             await device.async_set_media_image_url(self._media_image_url)
                             await device.async_set_playhead_position(self.media_position)
                             await device.async_set_duration(self.media_duration)
@@ -1013,23 +1015,23 @@ class LinkPlayDevice(MediaPlayerEntity):
                             await device.async_set_sound_mode(self._sound_mode)
                             await device.async_set_features(self._features)
 
-                    for slave in slave_list['slave_list']:
+                    for agent in agent_list['agent_list']:
                         for device in self.hass.data[DOMAIN].entities:
                             if device.entity_id in self._multiroom_group:
                                 await device.async_set_multiroom_group(self._multiroom_group)
 
         else:
-            _LOGGER.debug("Erroneous JSON during slave list parsing and processing: %s, %s", self.entity_id, self._name)
+            _LOGGER.debug("Erroneous JSON during agent list parsing and processing: %s, %s", self.entity_id, self._name)
 
         return True
 
     @property
     def name(self):
         """Return the name of the device."""
-        if self._slave_mode:
+        if self._agent_mode:
             for dev in self._multiroom_group:
                 for device in self.hass.data[DOMAIN].entities:
-                    if device._is_master:
+                    if device._is_main:
                         return self._name + ' [' + device._name + ']'
         else:
             return self._name
@@ -1048,7 +1050,7 @@ class LinkPlayDevice(MediaPlayerEntity):
         if self._muted:
             return ICON_MUTED
 
-        if self._slave_mode or self._is_master:
+        if self._agent_mode or self._is_main:
             return ICON_MULTIROOM
 
         if self._source == "Bluetooth":
@@ -1110,7 +1112,7 @@ class LinkPlayDevice(MediaPlayerEntity):
     @property
     def supported_features(self) -> MediaPlayerEntityFeature:
         """Flag media player features that are supported."""
-        if self._slave_mode and self._features:
+        if self._agent_mode and self._features:
             return self._features
 
         if self._playing_localfile or self._playing_spotify or self._playing_webplaylist:
@@ -1186,7 +1188,7 @@ class LinkPlayDevice(MediaPlayerEntity):
     @property
     def media_position(self):
         """Time in seconds of current playback head position."""
-        if (self._playing_localfile or self._playing_spotify or self._slave_mode or self._playing_mediabrowser) and self._state != STATE_UNAVAILABLE:
+        if (self._playing_localfile or self._playing_spotify or self._agent_mode or self._playing_mediabrowser) and self._state != STATE_UNAVAILABLE:
             return self._playhead_position
         else:
             return None
@@ -1194,7 +1196,7 @@ class LinkPlayDevice(MediaPlayerEntity):
     @property
     def media_duration(self):
         """Time in seconds of current song duration."""
-        if (self._playing_localfile or self._playing_spotify or self._slave_mode or self._playing_mediabrowser) and self._state != STATE_UNAVAILABLE:
+        if (self._playing_localfile or self._playing_spotify or self._agent_mode or self._playing_mediabrowser) and self._state != STATE_UNAVAILABLE:
             return self._duration
         else:
             return None
@@ -1253,24 +1255,29 @@ class LinkPlayDevice(MediaPlayerEntity):
         return self._wifi_channel
 
     @property
-    def slave_ip(self):
+    def agent_ip(self):
         """Ip used in multiroom configuration."""
-        return self._slave_ip
+        return self._agent_ip
 
     @property
-    def slave(self):
-        """Return true if it is a slave."""
-        return self._slave_mode
+    def agent(self):
+        """Return true if it is an agent."""
+        return self._agent_mode
 
     @property
-    def master(self):
-        """master's entity id used in multiroom configuration."""
-        return self._master
+    def main(self):
+        """main's entity id used in multiroom configuration."""
+        return self._main
 
     @property
-    def is_master(self):
-        """Return true if it is a master."""
-        return self._is_master
+    def is_main(self):
+        """Return true if it is a main."""
+        return self._is_main
+
+    @property
+    def volume_offset(self):
+        """Return the volume offset for this device in a multiroom group."""
+        return self._volume_offset
 
     @property
     def device_class(self) -> MediaPlayerDeviceClass:
@@ -1278,15 +1285,17 @@ class LinkPlayDevice(MediaPlayerEntity):
 
     @property
     def extra_state_attributes(self):
-        """List members in group and set master and slave state."""
+        """List members in group and set main and agent state."""
         attributes = {}
         if self._multiroom_group != []:
             attributes[ATTR_LINKPLAY_GROUP] = self._multiroom_group
             attributes[ATTR_GROUP_MEMBERS] = self._multiroom_group
 
-        attributes[ATTR_MASTER] = self._is_master
-        if self._slave_mode:
-            attributes[ATTR_SLAVE] = self._slave_mode
+        attributes[ATTR_MAIN] = self._is_main
+        if self._agent_mode:
+            attributes[ATTR_AGENT] = self._agent_mode
+        if self._volume_offset != 0:
+            attributes['volume_offset'] = self._volume_offset
         if self._media_uri_final:
             attributes[ATTR_STURI] = self._media_uri_final
         if len(self._trackq) > 0:
@@ -1356,7 +1365,7 @@ class LinkPlayDevice(MediaPlayerEntity):
 
     async def async_media_next_track(self):
         """Send media_next command to media player."""
-        if not self._slave_mode:
+        if not self._agent_mode:
             value = await self.call_linkplay_httpapi("setPlayerCmd:next", None)
             self._playhead_position = 0
             self._duration = 0
@@ -1366,11 +1375,11 @@ class LinkPlayDevice(MediaPlayerEntity):
             if value != "OK":
                 _LOGGER.warning("Failed skip to next track. Device: %s, Got response: %s", self.entity_id, value)
         else:
-            await self._master.async_media_next_track()
+            await self._main.async_media_next_track()
 
     async def async_media_previous_track(self):
         """Send media_previous command to media player."""
-        if not self._slave_mode:
+        if not self._agent_mode:
             value = await self.call_linkplay_httpapi("setPlayerCmd:prev", None)
             self._playhead_position = 0
             self._duration = 0
@@ -1380,11 +1389,11 @@ class LinkPlayDevice(MediaPlayerEntity):
             if value != "OK":
                 _LOGGER.warning("Failed to skip to previous track." " Device: %s, Got response: %s", self.entity_id, value)
         else:
-            await self._master.async_media_previous_track()
+            await self._main.async_media_previous_track()
 
     async def async_media_play(self):
         """Send media_play command to media player."""
-        if not self._slave_mode:
+        if not self._agent_mode:
             if self._state == STATE_PAUSED:
                 value = await self.call_linkplay_httpapi("setPlayerCmd:resume", None)
 
@@ -1409,18 +1418,18 @@ class LinkPlayDevice(MediaPlayerEntity):
                 #self._playing_tts = False
                 self._position_updated_at = utcnow()
                 self._idletime_updated_at = self._position_updated_at
-                if self._slave_list is not None:
-                    for slave in self._slave_list:
-                        await slave.async_set_state(self._state)
-                        await slave.async_set_position_updated_at(self.media_position_updated_at)
+                if self._agent_list is not None:
+                    for agent in self._agent_list:
+                        await agent.async_set_state(self._state)
+                        await agent.async_set_position_updated_at(self.media_position_updated_at)
             else:
                 _LOGGER.warning("Failed to start or resume playback. Device: %s, Got response: %s", self.entity_id, value)
         else:
-            await self._master.async_media_play()
+            await self._main.async_media_play()
 
     async def async_media_pause(self):
         """Send media_pause command to media player."""
-        if not self._slave_mode:
+        if not self._agent_mode:
             if self._playing_stream and not self._playing_mediabrowser:
                 # Pausing a live stream will cause a buffer overrun in hardware. Stop is the correct procedure in this case.
                 # If the stream is configured as an input source, when pressing Play after this, it will be started again (using self._prev_source).
@@ -1434,19 +1443,19 @@ class LinkPlayDevice(MediaPlayerEntity):
                 if self._playing_spotify:
                     self._spotify_paused_at = utcnow()
                 self._state = STATE_PAUSED
-                if self._slave_list is not None:
-                    for slave in self._slave_list:
-                        await slave.async_set_state(self._state)
-                        await slave.async_set_position_updated_at(self.media_position_updated_at)
+                if self._agent_list is not None:
+                    for agent in self._agent_list:
+                        await agent.async_set_state(self._state)
+                        await agent.async_set_position_updated_at(self.media_position_updated_at)
 #                #await self.async_schedule_update_ha_state(True)
             else:
                 _LOGGER.warning("Failed to pause playback. Device: %s, Got response: %s", self.entity_id, value)
         else:
-            await self._master.async_media_pause()
+            await self._main.async_media_pause()
 
     async def async_media_stop(self):
         """Send stop command."""
-        if not self._slave_mode:
+        if not self._agent_mode:
  
             if self._playing_spotify or self._playing_liveinput:
                 if self._fwvercheck(self._fw_ver) >= self._fwvercheck(FW_SLOW_STREAMS):
@@ -1483,18 +1492,18 @@ class LinkPlayDevice(MediaPlayerEntity):
                 self._idletime_updated_at = self._position_updated_at
                 self._spotify_paused_at = None
                 #await self.async_schedule_update_ha_state(True)
-                if self._slave_list is not None:
-                    for slave in self._slave_list:
-                        await slave.async_set_state(self._state)
-                        await slave.async_set_position_updated_at(self.media_position_updated_at)
+                if self._agent_list is not None:
+                    for agent in self._agent_list:
+                        await agent.async_set_state(self._state)
+                        await agent.async_set_position_updated_at(self.media_position_updated_at)
             else:
                 _LOGGER.warning("Failed to stop playback. Device: %s, Got response: %s", self.entity_id, value)
         else:
-            await self._master.async_media_stop()
+            await self._main.async_media_stop()
 
     async def async_media_seek(self, position):
         """Send media_seek command to media player."""
-        if not self._slave_mode:
+        if not self._agent_mode:
             _LOGGER.debug("Seek. Device: %s, DUR: %s POS: %", self.name, self._duration, position)
             if self._duration > 0 and position >= 0 and position <= self._duration:
                 value = await self.call_linkplay_httpapi("setPlayerCmd:seek:{0}".format(str(position)), None)
@@ -1504,7 +1513,7 @@ class LinkPlayDevice(MediaPlayerEntity):
                 if value != "OK":
                     _LOGGER.warning("Failed to seek. Device: %s, Got response: %s", self.entity_id, value)
         else:
-            await self._master.async_media_seek(position)
+            await self._main.async_media_seek(position)
 
     async def async_clear_playlist(self):
         """Clear players playlist."""
@@ -1513,7 +1522,7 @@ class LinkPlayDevice(MediaPlayerEntity):
     async def async_play_media(self, media_type, media_id, **kwargs):
         """Play media from a URL or localfile."""
         _LOGGER.debug("Trying to play media. Device: %s, Media_type: %s, Media_id: %s", self.entity_id, media_type, media_id)
-        if not self._slave_mode:
+        if not self._agent_mode:
 
             if not (media_type in [MediaType.MUSIC, MediaType.URL, MediaType.TRACK] or media_source.is_media_source_id(media_id)):
                 _LOGGER.warning("For: %s Invalid media type %s. Only %s and %s is supported", self._name, media_type, MediaType.MUSIC, MediaType.URL)
@@ -1633,11 +1642,11 @@ class LinkPlayDevice(MediaPlayerEntity):
 
         else:
             if not self._snapshot_active:
-                await self._master.async_play_media(media_type, media_id)
+                await self._main.async_play_media(media_type, media_id)
 
     async def async_select_source(self, source):
         """Select input source."""
-        if not self._slave_mode:
+        if not self._agent_mode:
             self._nometa = False
             temp_source = next((k for k in self._source_list if self._source_list[k] == source), None)
             if temp_source == None:
@@ -1686,9 +1695,9 @@ class LinkPlayDevice(MediaPlayerEntity):
                     self._icecast_name = None
                     self._media_image_url = None
                     self._ice_skip_throt = True
-                    if self._slave_list is not None:
-                        for slave in self._slave_list:
-                            await slave.async_set_source(source)
+                    if self._agent_list is not None:
+                        for agent in self._agent_list:
+                            await agent.async_set_source(source)
                 else:
                     _LOGGER.warning("Failed to select http source and play. Device: %s, Got response: %s", self.entity_id, value)
             else:
@@ -1707,35 +1716,35 @@ class LinkPlayDevice(MediaPlayerEntity):
                     self._trackc = None
                     self._position_updated_at = utcnow()
                     self._idletime_updated_at = self._position_updated_at
-                    if self._slave_list is not None:
-                        for slave in self._slave_list:
-                            await slave.async_set_source(source)
+                    if self._agent_list is not None:
+                        for agent in self._agent_list:
+                            await agent.async_set_source(source)
                 else:
                     _LOGGER.warning("Failed to select source. Device: %s, Got response: %s", self.entity_id, value)
 
             #await self.async_schedule_update_ha_state(True)
         else:
-            await self._master.async_select_source(source)
+            await self._main.async_select_source(source)
 
     async def async_select_sound_mode(self, sound_mode):
         """Set Sound Mode for device."""
-        if not self._slave_mode:
+        if not self._agent_mode:
             mode = list(SOUND_MODES.keys())[list(
                 SOUND_MODES.values()).index(sound_mode)]
             value = await self.call_linkplay_httpapi("setPlayerCmd:equalizer:{0}".format(mode), None)
             if value == "OK":
                 self._sound_mode = sound_mode
-                if self._slave_list is not None:
-                    for slave in self._slave_list:
-                        await slave.async_set_sound_mode(sound_mode)
+                if self._agent_list is not None:
+                    for agent in self._agent_list:
+                        await agent.async_set_sound_mode(sound_mode)
             else:
                 _LOGGER.warning("Failed to set sound mode. Device: %s, Got response: %s", self.entity_id, value)
         else:
-            await self._master.async_select_sound_mode(sound_mode)
+            await self._main.async_select_sound_mode(sound_mode)
 
     async def async_set_shuffle(self, shuffle):
         """Change the shuffle mode."""
-        if not self._slave_mode:
+        if not self._agent_mode:
             if shuffle:
                 self._shuffle = shuffle
                 mode = '2'
@@ -1750,11 +1759,11 @@ class LinkPlayDevice(MediaPlayerEntity):
             if value != "OK":
                 _LOGGER.warning("Failed to change shuffle mode. Device: %s, Got response: %s", self.entity_id, value)
         else:
-            await self._master.async_set_shuffle(shuffle)
+            await self._main.async_set_shuffle(shuffle)
 
     async def async_set_repeat(self, repeat):
         """Change the repeat mode."""
-        if not self._slave_mode:
+        if not self._agent_mode:
             self._repeat = repeat
             if repeat == RepeatMode.OFF:
                 mode = '0'
@@ -1766,7 +1775,7 @@ class LinkPlayDevice(MediaPlayerEntity):
             if value != "OK":
                 _LOGGER.warning("Failed to change repeat mode. Device: %s, Got response: %s", self.entity_id, value)
         else:
-            await self._master.async_set_repeat(repeat)
+            await self._main.async_set_repeat(repeat)
 
     async def async_volume_up(self):
         """Increase volume one step"""
@@ -1777,7 +1786,7 @@ class LinkPlayDevice(MediaPlayerEntity):
         if volume > 100:
             volume = 100
 
-        if not (self._slave_mode and self._multiroom_wifidirect):
+        if not (self._agent_mode and self._multiroom_wifidirect):
 
             if self._is_master:
                 value = await self.call_linkplay_httpapi("setPlayerCmd:slave_vol:{0}".format(str(volume)), None)
@@ -1791,7 +1800,7 @@ class LinkPlayDevice(MediaPlayerEntity):
         else:
             if self._snapshot_active:
                 return
-            value = await self._master.call_linkplay_httpapi("multiroom:SlaveVolume:{0}:{1}".format(self._slave_ip, str(volume)), None)
+            value = await self._main.call_linkplay_httpapi("multiroom:SlaveVolume:{0}:{1}".format(self._agent_ip, str(volume)), None)
             if value == "OK":
                 self._volume = volume
             else:
@@ -1806,7 +1815,7 @@ class LinkPlayDevice(MediaPlayerEntity):
         if volume < 0:
             volume = 0
 
-        if not (self._slave_mode and self._multiroom_wifidirect):
+        if not (self._agent_mode and self._multiroom_wifidirect):
 
             if self._is_master:
                 value = await self.call_linkplay_httpapi("setPlayerCmd:slave_vol:{0}".format(str(volume)), None)
@@ -1820,7 +1829,7 @@ class LinkPlayDevice(MediaPlayerEntity):
         else:
             if self._snapshot_active:
                 return
-            value = await self._master.call_linkplay_httpapi("multiroom:SlaveVolume:{0}:{1}".format(self._slave_ip, str(volume)), None)
+            value = await self._main.call_linkplay_httpapi("multiroom:SlaveVolume:{0}:{1}".format(self._agent_ip, str(volume)), None)
             if value == "OK":
                 self._volume = volume
             else:
@@ -1829,7 +1838,7 @@ class LinkPlayDevice(MediaPlayerEntity):
     async def async_set_volume_level(self, volume):
         """Set volume level, input range 0..1, linkplay device 0..100."""
         volume = str(round(int(volume * MAX_VOL)))
-        if not (self._slave_mode and self._multiroom_wifidirect):
+        if not (self._agent_mode and self._multiroom_wifidirect):
 
             # if self._fadevol:
                 # voldiff = int(self._volume) - int(volume)
@@ -1863,7 +1872,7 @@ class LinkPlayDevice(MediaPlayerEntity):
         else:
             if self._snapshot_active:
                 return
-            value = await self._master.call_linkplay_httpapi("multiroom:SlaveVolume:{0}:{1}".format(self._slave_ip, str(volume)), None)
+            value = await self._main.call_linkplay_httpapi("multiroom:SlaveVolume:{0}:{1}".format(self._agent_ip, str(volume)), None)
             if value == "OK":
                 self._volume = volume
             else:
@@ -1872,7 +1881,7 @@ class LinkPlayDevice(MediaPlayerEntity):
 
     async def async_mute_volume(self, mute):
         """Mute (true) or unmute (false) media player."""
-        if not (self._slave_mode and self._multiroom_wifidirect):
+        if not (self._agent_mode and self._multiroom_wifidirect):
             if self._is_master:
                 value = await self.call_linkplay_httpapi("setPlayerCmd:slave_mute:{0}".format(str(int(mute))), None)
             else:
@@ -1883,7 +1892,7 @@ class LinkPlayDevice(MediaPlayerEntity):
             else:
                 _LOGGER.warning("Failed mute/unmute volume. Device: %s, Got response: %s", self.entity_id, value)
         else:
-            value = await self._master.call_linkplay_httpapi("multiroom:SlaveVolume:{0}:{1}".format(self._slave_ip, str(int(mute))), None)
+            value = await self._main.call_linkplay_httpapi("multiroom:SlaveVolume:{0}:{1}".format(self._agent_ip, str(int(mute))), None)
             if value == "OK":
                 self._muted = bool(int(mute))
             else:
@@ -2265,22 +2274,26 @@ class LinkPlayDevice(MediaPlayerEntity):
         """Set multiroom group info."""
         self._multiroom_group = multiroom_group
 
-    async def async_set_master(self, master):
-        """Set master device for multiroom configuration."""
-        self._master = master
+    async def async_set_main(self, main):
+        """Set main device for multiroom configuration."""
+        self._main = main
 
-    async def async_set_is_master(self, is_master):
-        """Set master device for multiroom configuration."""
-        self._is_master = is_master
+    async def async_set_is_main(self, is_main):
+        """Set main device for multiroom configuration."""
+        self._is_main = is_main
 
     async def async_set_multiroom_unjoinat(self, tme):
         """The moment when unjoin has happened. Needs some time for the MCU to finish unjoining first"""
         self._multiroom_unjoinat = tme
 
-    async def async_set_slave_mode(self, slave_mode):
-        """Set current device as slave in a multiroom configuration."""
-        self._slave_mode = slave_mode
+    async def async_set_agent_mode(self, agent_mode):
+        """Set current device as agent in a multiroom configuration."""
+        self._agent_mode = agent_mode
         ##await self.async_schedule_update_ha_state(True)
+
+    async def async_set_volume_offset(self, offset):
+        """Set the volume offset for this device in a multiroom group."""
+        self._volume_offset = max(-50, min(50, int(offset)))  # Clamp between -50 and +50
 
     async def async_set_previous_source(self, srcbool):
         """Memorize what was the previous source before entering multiroom."""
@@ -2314,9 +2327,9 @@ class LinkPlayDevice(MediaPlayerEntity):
         """Set the state property."""
         self._state = state
 
-    async def async_set_slave_ip(self, slave_ip):
-        """Set the slave ip property."""
-        self._slave_ip = slave_ip
+    async def async_set_agent_ip(self, agent_ip):
+        """Set the agent ip property."""
+        self._agent_ip = agent_ip
 
     async def async_set_playhead_position(self, position):
         """Set the playhead position property."""
@@ -2362,7 +2375,7 @@ class LinkPlayDevice(MediaPlayerEntity):
     async def async_preset_button(self, preset):
         """Simulate pressing a physical preset button."""
         if self._preset_key != None and preset != None:
-            if not self._slave_mode:
+            if not self._agent_mode:
                 if int(preset) > 0 and int(preset) <= self._preset_key:
                     value = await self.call_linkplay_httpapi("MCUKeyShortClick:{0}".format(str(preset)), None)
                     # self._wait_for_mcu = 2
@@ -2372,93 +2385,93 @@ class LinkPlayDevice(MediaPlayerEntity):
                 else:
                     _LOGGER.warning("Wrong preset number %s. Device: %s, has to be integer between 1 and %s", self.entity_id, preset, self._preset_key)
             else:
-                await self._master.async_preset_button(preset)
+                await self._main.async_preset_button(preset)
 
-    async def async_join_players(self, slaves):
+    async def async_join_players(self, agents):
         """Join `group_members` as a player group with the current player (standard HA)."""
         entities = self.hass.data[DOMAIN].entities
-        entities = [e for e in entities if e.entity_id in slaves]
+        entities = [e for e in entities if e.entity_id in agents]
         await self.async_join(entities)
 
-    async def async_join(self, slaves):
-        """Add selected slaves to multiroom configuration (original implementation)."""
-        _LOGGER.debug("Multiroom JOIN request: Master: %s, Slaves: %s", self.entity_id, slaves)
+    async def async_join(self, agents):
+        """Add selected agents to multiroom configuration (original implementation)."""
+        _LOGGER.debug("Multiroom JOIN request: Main: %s, Agents: %s", self.entity_id, agents)
         if self._state == STATE_UNAVAILABLE:
             return
 
         if self.entity_id not in self._multiroom_group:
             self._multiroom_group.append(self.entity_id)
-            self._is_master = True
+            self._is_main = True
             self._wait_for_mcu = 2
 
-        for slave in slaves:
-            if slave._is_master:
-                _LOGGER.debug("Multiroom: slave has master flag set. Unjoining it from where it is. Master: %s, Slave: %s", self.entity_id, slave.entity_id)
-                await slave.async_unjoin_all()
+        for agent in agents:
+            if agent._is_main:
+                _LOGGER.debug("Multiroom: agent has main flag set. Unjoining it from where it is. Main: %s, Agent: %s", self.entity_id, agent.entity_id)
+                await agent.async_unjoin_all()
 
-            if slave.entity_id not in self._multiroom_group:
-                if slave._slave_mode:
-                    _LOGGER.debug("Multiroom: slave already has slave flag set. Unjoining it from where it is. Master: %s, Slave: %s", self.entity_id, slave.entity_id)
-                    await slave.async_unjoin_me()
+            if agent.entity_id not in self._multiroom_group:
+                if agent._agent_mode:
+                    _LOGGER.debug("Multiroom: agent already has agent flag set. Unjoining it from where it is. Main: %s, Agent: %s", self.entity_id, agent.entity_id)
+                    await agent.async_unjoin_me()
 
-                await slave.async_set_previous_source(True)
+                await agent.async_set_previous_source(True)
                 if self._multiroom_wifidirect:
-                    _LOGGER.debug("Multiroom: Join in WiFi drect mode. Master: %s, Slave: %s", self.entity_id, slave.entity_id)
-                    cmd = "ConnectMasterAp:ssid={0}:ch={1}:auth=OPEN:".format(self._ssid, self._wifi_channel) + "encry=NONE:pwd=:chext=0"
+                    _LOGGER.debug("Multiroom: Join in WiFi direct mode. Main: %s, Agent: %s", self.entity_id, agent.entity_id)
+                    cmd = "ConnectMainAp:ssid={0}:ch={1}:auth=OPEN:".format(self._ssid, self._wifi_channel) + "encry=NONE:pwd=:chext=0"
                 else:
-                    _LOGGER.debug("Multiroom: Join in multiroom mode. Master: %s, Slave: %s", self.entity_id, slave.entity_id)
-                    cmd = 'ConnectMasterAp:JoinGroupMaster:eth{0}:wifi0.0.0.0'.format(self._host)
+                    _LOGGER.debug("Multiroom: Join in multiroom mode. Main: %s, Agent: %s", self.entity_id, agent.entity_id)
+                    cmd = 'ConnectMainAp:JoinGroupMain:eth{0}:wifi0.0.0.0'.format(self._host)
 
-                value = await slave.call_linkplay_httpapi(cmd, None)
-                
-                _LOGGER.debug("Multiroom: command result: %s Master: %s, Slave: %s", value, self.entity_id, slave.entity_id)
+                value = await agent.call_linkplay_httpapi(cmd, None)
+
+                _LOGGER.debug("Multiroom: command result: %s Main: %s, Agent: %s", value, self.entity_id, agent.entity_id)
                 if value == "OK":
-#                    await slave.async_set_volume(self._volume)
-#                    await slave.async_set_volume_level(self._volume)
-                    await slave.async_set_master(self)
-                    await slave.async_set_is_master(False)
-                    await slave.async_set_slave_mode(True)
-                    await slave.async_set_media_title(self._media_title)
-                    await slave.async_set_media_artist(self._media_artist)
-#                    await slave.async_set_muted(self._muted)
-                    await slave.async_set_state(self.state)
-                    await slave.async_set_slave_ip(self._host)
-                    await slave.async_set_media_image_url(self._media_image_url)
-                    await slave.async_set_playhead_position(self.media_position)
-                    await slave.async_set_duration(self.media_duration)
-                    await slave.async_set_source(self._source)
-                    await slave.async_set_sound_mode(self._sound_mode)
-                    await slave.async_set_features(self._features)
-                    self._multiroom_group.append(slave.entity_id)
+#                    await agent.async_set_volume(self._volume)
+#                    await agent.async_set_volume_level(self._volume)
+                    await agent.async_set_main(self)
+                    await agent.async_set_is_main(False)
+                    await agent.async_set_agent_mode(True)
+                    await agent.async_set_media_title(self._media_title)
+                    await agent.async_set_media_artist(self._media_artist)
+#                    await agent.async_set_muted(self._muted)
+                    await agent.async_set_state(self.state)
+                    await agent.async_set_agent_ip(self._host)
+                    await agent.async_set_media_image_url(self._media_image_url)
+                    await agent.async_set_playhead_position(self.media_position)
+                    await agent.async_set_duration(self.media_duration)
+                    await agent.async_set_source(self._source)
+                    await agent.async_set_sound_mode(self._sound_mode)
+                    await agent.async_set_features(self._features)
+                    self._multiroom_group.append(agent.entity_id)
                 else:
-                    await slave.async_set_previous_source(False)
-                    _LOGGER.warning("Failed to join multiroom. command result: %s Master: %s, Slave: %s", value, self.entity_id, slave.entity_id)
+                    await agent.async_set_previous_source(False)
+                    _LOGGER.warning("Failed to join multiroom. command result: %s Main: %s, Agent: %s", value, self.entity_id, agent.entity_id)
 
-        for slave in slaves:
-            if slave.entity_id in self._multiroom_group:
-                await slave.async_set_multiroom_group(self._multiroom_group)
-##                await slave.async_set_position_updated_at(utcnow())
-##                await slave.async_trigger_schedule_update(True)
+        for agent in agents:
+            if agent.entity_id in self._multiroom_group:
+                await agent.async_set_multiroom_group(self._multiroom_group)
+##                await agent.async_set_position_updated_at(utcnow())
+##                await agent.async_trigger_schedule_update(True)
 
         self._position_updated_at = utcnow()
         # await self.async_schedule_update_ha_state(True)
 
     async def async_unjoin_all(self):
-        """Disconnect everybody from the multiroom configuration because i'm the master."""
+        """Disconnect everybody from the multiroom configuration because I'm the main."""
         if self._state == STATE_UNAVAILABLE:
             return
 
         cmd = "multiroom:Ungroup"
         value = await self.call_linkplay_httpapi(cmd, None)
         if value == "OK":
-            self._is_master = False
-            for slave_id in self._multiroom_group:
+            self._is_main = False
+            for agent_id in self._multiroom_group:
                 for device in self.hass.data[DOMAIN].entities:
-                    if device.entity_id == slave_id and device.entity_id != self.entity_id:
-                        await device.async_set_slave_mode(False)
-                        await device.async_set_is_master(False)
-                        await device.async_set_slave_ip(None)
-                        await device.async_set_master(None)
+                    if device.entity_id == agent_id and device.entity_id != self.entity_id:
+                        await device.async_set_agent_mode(False)
+                        await device.async_set_is_main(False)
+                        await device.async_set_agent_ip(None)
+                        await device.async_set_main(None)
                         await device.async_set_multiroom_unjoinat(utcnow())
                         await device.async_set_multiroom_group([])
                         # await device.async_trigger_schedule_update(True)
@@ -2474,7 +2487,7 @@ class LinkPlayDevice(MediaPlayerEntity):
         if self._is_master:
             await self.async_unjoin_all()
 
-        if self._slave_mode:
+        if self._agent_mode:
             await self.async_unjoin_me()
 
     async def async_unjoin_me(self):
@@ -2482,25 +2495,25 @@ class LinkPlayDevice(MediaPlayerEntity):
         if self._multiroom_wifidirect:
             for dev in self._multiroom_group:
                 for device in self.hass.data[DOMAIN].entities:
-                    if device._is_master:    ## TODO!!!
-                        cmd = "multiroom:SlaveKickout:{0}".format(self._slave_ip)
-                        value = await self._master.call_linkplay_httpapi(cmd, None)
-                        self._master._position_updated_at = utcnow()
+                    if device._is_main:    ## TODO!!!
+                        cmd = "multiroom:AgentKickout:{0}".format(self._agent_ip)
+                        value = await self._main.call_linkplay_httpapi(cmd, None)
+                        self._main._position_updated_at = utcnow()
 
         else:
             cmd = "multiroom:Ungroup"
             value = await self.call_linkplay_httpapi(cmd, None)
 
         if value == "OK":
-            if self._master is not None:
-                await self._master.async_remove_from_group(self)
-                self._master._wait_for_mcu = 1
-                # await self._master.async_schedule_update_ha_state(True)
+            if self._main is not None:
+                await self._main.async_remove_from_group(self)
+                self._main._wait_for_mcu = 1
+                # await self._main.async_schedule_update_ha_state(True)
             self._multiroom_unjoinat = utcnow()
-            self._master = None
-            self._is_master = False
-            self._slave_mode = False
-            self._slave_ip = None
+            self._main = None
+            self._is_main = False
+            self._agent_mode = False
+            self._agent_ip = None
             self._multiroom_group = []
             # await self.async_schedule_update_ha_state(True)
 
@@ -2515,8 +2528,9 @@ class LinkPlayDevice(MediaPlayerEntity):
 
         if len(self._multiroom_group) <= 1:
             self._multiroom_group = []
-            self._is_master = False
-            self._slave_list = None
+            self._is_main = False
+            self._agent_list = None
+            self._agent_list = None
 
         for member in self._multiroom_group:
             for player in self.hass.data[DOMAIN].entities:
@@ -2593,7 +2607,7 @@ class LinkPlayDevice(MediaPlayerEntity):
         if self._state == STATE_UNAVAILABLE:
             return
 
-        if not self._slave_mode:
+        if not self._agent_mode:
             self._snapshot_active = True
             self._snap_source = self._source
             self._snap_state = self._state
@@ -2654,7 +2668,7 @@ class LinkPlayDevice(MediaPlayerEntity):
                 await self.call_linkplay_httpapi("setPlayerCmd:stop", None)
         else:
             return
-            #await self._master.async_snapshot(switchinput)
+            #await self._main.async_snapshot(switchinput)
 
 
     async def async_restore(self):
@@ -2662,7 +2676,7 @@ class LinkPlayDevice(MediaPlayerEntity):
         if self._state == STATE_UNAVAILABLE:
             return
 
-        if not self._slave_mode:
+        if not self._agent_mode:
             _LOGGER.debug("Player %s current source: %s, restoring volume: %s, source: %s uri: %s, seek: %s, pos: %s", self.name, self._source, self._snap_volume, self._snap_source, self._snap_uri, self._snap_seek, self._snap_playhead_position)
             if self._snap_state != STATE_UNKNOWN:
                 self._state = self._snap_state
@@ -2713,7 +2727,7 @@ class LinkPlayDevice(MediaPlayerEntity):
 
         else:
             return
-            #await self._master.async_restore()
+            #await self._main.async_restore()
 
     async def async_play_track(self, track):
         """Play media track by name found in the tracks list."""
@@ -2723,7 +2737,7 @@ class LinkPlayDevice(MediaPlayerEntity):
         track.hass = self.hass   # render template
         trackn = track.async_render()
 
-        if not self._slave_mode:
+        if not self._agent_mode:
             try:
                 index = [idx for idx, s in enumerate(self._trackq) if trackn in s][0]
             except (IndexError):
@@ -2756,7 +2770,7 @@ class LinkPlayDevice(MediaPlayerEntity):
                 # await self.async_schedule_update_ha_state(True)
                 return True
         else:
-            await self._master.async_play_track(track)
+            await self._main.async_play_track(track)
 
     async def async_update_via_upnp(self):
         """Update track info via UPNP."""
