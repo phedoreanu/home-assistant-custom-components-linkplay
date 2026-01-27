@@ -152,7 +152,103 @@ These services are compatible out of the box with the speaker group object in @k
 
 It's also possible to use Home Assistant's [standard multiroom](https://www.home-assistant.io/integrations/media_player/#service-media_playerjoin) join and unjoin functions for multiroom control.
 
-*Tip*: if you experience temporary `Unavailable` status on the slaves afer unjoining from a multiroom group in router mode, run once the Linkplay-specific command `RouterMultiroomEnable` - see details further down.
+*Tip*: if you experience temporary `Unavailable` status on the slaves after unjoining from a multiroom group in router mode, run once the Linkplay-specific command `RouterMultiroomEnable` - see details further down.
+
+### Example Usage of the New set_group_volume Service
+
+Set the volume for all devices in a multiroom group:
+
+```yaml
+service: linkplay.set_group_volume
+data:
+  entity_id: media_player.living_room  # The master device
+  volume: 0.5  # 50% volume
+```
+
+#### With Volume Offsets
+
+Set different volumes for each speaker in the group:
+
+```yaml
+service: linkplay.set_group_volume
+data:
+  entity_id: media_player.living_room
+  volume: 0.5  # Base volume at 50%
+  volume_offsets:
+    media_player.kitchen: 10      # Kitchen at 60% (50% + 10%)
+    media_player.bedroom: -15     # Bedroom at 35% (50% - 15%)
+    media_player.bathroom: 5      # Bathroom at 55% (50% + 5%)
+```
+
+#### Automation Example
+
+Automatically adjust group volume based on time of day:
+
+```yaml
+automation:
+  - alias: "Morning Music Volume"
+    trigger:
+      - platform: time
+        at: "07:00:00"
+    action:
+      - service: linkplay.set_group_volume
+        data:
+          entity_id: media_player.living_room
+          volume: 0.3  # Quieter in the morning
+          volume_offsets:
+            media_player.bedroom: -10  # Even quieter in bedroom
+            media_player.kitchen: 5    # Slightly louder in kitchen
+  
+  - alias: "Evening Music Volume"
+    trigger:
+      - platform: time
+        at: "18:00:00"
+    action:
+      - service: linkplay.set_group_volume
+        data:
+          entity_id: media_player.living_room
+          volume: 0.6  # Louder in the evening
+          volume_offsets:
+            media_player.bedroom: -5
+            media_player.kitchen: 10
+```
+
+#### Script Example
+
+Create a reusable script for party mode:
+
+```yaml
+script:
+  party_mode:
+    sequence:
+      - service: linkplay.join
+        data:
+          master: media_player.living_room
+          entity_id:
+            - media_player.kitchen
+            - media_player.bedroom
+            - media_player.bathroom
+      
+      - delay:
+          seconds: 2
+      
+      - service: linkplay.set_group_volume
+        data:
+          entity_id: media_player.living_room
+          volume: 0.7
+          volume_offsets:
+            media_player.kitchen: 10      # Kitchen louder
+            media_player.bedroom: -20     # Bedroom much quieter
+            media_player.bathroom: 0      # Bathroom same as main
+```
+
+## Notes
+
+- Volume offsets support integer percentage values from -100 to +100, or fractional values from -1.0 to +1.0
+- The final volume for each device is clamped between 0.0 and 1.0
+- Offsets are applied only for the current service call; they are not persisted or exposed as device attributes
+- The service can be called on any member of an active multiroom group; the `entity_id` is used as the reference device for the base group volume
+
 
 ## Presets
 
