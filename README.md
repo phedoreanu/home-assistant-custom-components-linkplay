@@ -161,7 +161,7 @@ Set the volume for all devices in a multiroom group:
 ```yaml
 service: linkplay.set_group_volume
 data:
-  entity_id: media_player.living_room  # The main device
+  entity_id: media_player.living_room  # The master device
   volume: 0.5  # 50% volume
 ```
 
@@ -223,7 +223,7 @@ script:
     sequence:
       - service: linkplay.join
         data:
-          main: media_player.living_room
+          master: media_player.living_room
           entity_id:
             - media_player.kitchen
             - media_player.bedroom
