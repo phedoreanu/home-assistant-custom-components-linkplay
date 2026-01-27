@@ -93,7 +93,6 @@ ICON_BLUETOOTH = 'mdi:speaker-bluetooth'
 ICON_PUSHSTREAM = 'mdi:cast-audio'
 ICON_TTS = 'mdi:speaker-message'
 
-ATTR_MAIN = 'main'
 ATTR_AGENT = 'agent'
 ATTR_LINKPLAY_GROUP = 'linkplay_group'
 ATTR_FWVER = 'firmware'
