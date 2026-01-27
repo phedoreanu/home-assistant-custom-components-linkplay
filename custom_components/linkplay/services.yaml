@@ -173,8 +173,8 @@ set_group_volume:
           mode: slider
     volume_offsets:
       name: Volume Offsets
-      description: Optional dictionary of entity_id to volume offset (-1.0 to 1.0) for individual speakers. Example - media_player.kitchen:-0.1, media_player.living_room:0.2
-      example: '{"media_player.kitchen": -0.1, "media_player.living_room": 0.2}'
+      description: Optional dictionary of entity_id to volume offset (percentage from -100 to 100) for individual speakers. Example - media_player.kitchen:-10, media_player.living_room:20
+      example: '{"media_player.kitchen": -10, "media_player.living_room": 20}'
       required: false
       selector:
         object:
