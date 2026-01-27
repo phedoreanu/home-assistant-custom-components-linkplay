@@ -244,7 +244,7 @@ script:
 
 ## Notes
 
-- Volume offsets range from -50 to +50 percentage points
+- Volume offsets support integer percentage values from -100 to +100, or fractional values from -1.0 to +1.0
 - The final volume for each device is clamped between 0.0 and 1.0
 - Offsets are applied only for the current service call; they are not persisted or exposed as device attributes
 - The service can be called on any member of an active multiroom group; the `entity_id` is used as the reference device for the base group volume
