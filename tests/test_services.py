@@ -561,4 +561,19 @@ class TestLinkplaySetGroupVolumeService:
                 blocking=True,
             )
 
+        # Test with invalid type (bool instead of int/float)
+        with pytest.raises(ValueError, match="Invalid type bool for volume offset.*expected int \\(percentage\\) or float \\(fractional\\)"):
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_SET_GROUP_VOLUME,
+                {
+                    ATTR_ENTITY_ID: "media_player.living_room",
+                    ATTR_VOLUME: 0.5,
+                    ATTR_VOLUME_OFFSETS: {
+                        "media_player.kitchen": True,  # Boolean is not supported
+                    },
+                },
+                blocking=True,
+            )
+
 
