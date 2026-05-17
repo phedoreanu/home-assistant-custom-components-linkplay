@@ -61,6 +61,7 @@ from .metadata import (
 )
 from .api_client_mixin import LinkPlayAPIClientMixin
 from .commands_mixin import LinkPlayCommandsMixin
+from .crossfade_mixin import LinkPlayCrossfadeMixin
 from .icecast_fetcher_mixin import LinkPlayIcecastFetcherMixin
 from .lastfm_mixin import LinkPlayLastFmMixin
 from .media_controls_mixin import LinkPlayMediaControlsMixin
@@ -77,11 +78,13 @@ from .const import (
     CONF_MULTIROOM_WIFIDIRECT,
     CONF_LEDOFF,
     CONF_VOLUME_STEP,
+    CONF_CROSSFADE_MS,
     CONF_SOURCES,
     DEFAULT_ICECAST_UPDATE,
     DEFAULT_MULTIROOM_WIFIDIRECT,
     DEFAULT_LEDOFF,
     DEFAULT_VOLUME_STEP,
+    DEFAULT_CROSSFADE_MS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -193,6 +196,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_LASTFM_API_KEY): cv.string,
         vol.Optional(CONF_UUID, default=''): cv.string,
         vol.Optional(CONF_VOLUME_STEP, default=DEFAULT_VOLUME_STEP): vol.All(int, vol.Range(min=1, max=25)),
+        vol.Optional(CONF_CROSSFADE_MS, default=DEFAULT_CROSSFADE_MS): vol.All(int, vol.Range(min=0, max=2000)),
     }
 )
 
@@ -222,6 +226,7 @@ async def async_setup_platform(hass, config, async_add_entities, _discovery_info
     multiroom_wifidirect = config.get(CONF_MULTIROOM_WIFIDIRECT)
     led_off = config.get(CONF_LEDOFF)
     volume_step = config.get(CONF_VOLUME_STEP)
+    crossfade_ms = config.get(CONF_CROSSFADE_MS, DEFAULT_CROSSFADE_MS)
     lastfm_api_key = config.get(CONF_LASTFM_API_KEY)
     uuid = config.get(CONF_UUID)
 
@@ -286,7 +291,8 @@ async def async_setup_platform(hass, config, async_add_entities, _discovery_info
                             volume_step,
                             lastfm_api_key,
                             uuid,
-                            state)
+                            state,
+                            crossfade_ms=crossfade_ms)
 
     _LOGGER.info("[%s @ %s] adding media_player entity (YAML)", name, host)
     async_add_entities([linkplay])
@@ -322,6 +328,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     volume_step = entry.options.get(
         CONF_VOLUME_STEP,
         entry.data.get(CONF_VOLUME_STEP, DEFAULT_VOLUME_STEP)
+    )
+    crossfade_ms = entry.options.get(
+        CONF_CROSSFADE_MS,
+        entry.data.get(CONF_CROSSFADE_MS, DEFAULT_CROSSFADE_MS)
     )
     lastfm_api_key = entry.data.get(CONF_LASTFM_API_KEY)
     uuid = entry.unique_id or ""
@@ -380,6 +390,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         lastfm_api_key,
         uuid,
         state,
+        crossfade_ms=crossfade_ms,
     )
 
     _LOGGER.info("[%s @ %s] adding media_player entity", name, host)
@@ -398,6 +409,7 @@ class LinkPlayDevice(
     LinkPlaySomaFmFetcherMixin,
     LinkPlayLastFmMixin,
     LinkPlayVolumeControlsMixin,
+    LinkPlayCrossfadeMixin,
     LinkPlayMediaControlsMixin,
     MediaPlayerEntity,
 ):
@@ -415,7 +427,8 @@ class LinkPlayDevice(
                  volume_step,
                  lastfm_api_key,
                  uuid,
-                 state):
+                 state,
+                 crossfade_ms: int = DEFAULT_CROSSFADE_MS):
         """Initialize the media player.
 
         ``self.hass`` is populated by Home Assistant when the entity is
@@ -437,6 +450,7 @@ class LinkPlayDevice(
         self._state = state
         self._volume = 0
         self._volume_step = volume_step
+        self._crossfade_ms = crossfade_ms
         self._led_off = led_off
         self._fadevol = False
         self._source = None
@@ -1276,7 +1290,12 @@ class LinkPlayDevice(
         return self._fw_ver
 
     async def async_play_media(self, media_type, media_id, **kwargs):
-        """Play media from a URL or localfile."""
+        """Play media from a URL or localfile, with a brief crossfade around the switch."""
+        return await self._async_crossfade_switch(
+            self._async_play_media_impl(media_type, media_id, **kwargs)
+        )
+
+    async def _async_play_media_impl(self, media_type, media_id, **kwargs):
         _LOGGER.debug("Trying to play media. Device: %s, Media_type: %s, Media_id: %s", self.entity_id, media_type, media_id)
         if not self._slave_mode:
 
@@ -1400,7 +1419,10 @@ class LinkPlayDevice(
         return True
 
     async def async_select_source(self, source):
-        """Select input source."""
+        """Select input source, with a brief volume crossfade around the switch."""
+        await self._async_crossfade_switch(self._async_select_source_impl(source))
+
+    async def _async_select_source_impl(self, source):
         if not self._slave_mode:
             self._nometa = False
             temp_source = next((k for k in self._source_list if self._source_list[k] == source), None)
@@ -1604,17 +1626,27 @@ class LinkPlayDevice(
         )
 
     async def async_preset_button(self, preset):
-        """Simulate pressing a physical preset button."""
-        if self._preset_key is not None and preset is not None:
-            if not self._slave_mode:
-                if 0 < int(preset) <= self._preset_key:
-                    value = await self.call_linkplay_httpapi(f"MCUKeyShortClick:{preset!s}", None)
-                    if value != "OK":
-                        _LOGGER.warning("Failed to recall preset %s. " "Device: %s, Got response: %s", self.entity_id, preset, value)
-                else:
-                    _LOGGER.warning("Wrong preset number %s. Device: %s, has to be integer between 1 and %s", self.entity_id, preset, self._preset_key)
-            else:
-                await self._master.async_preset_button(preset)
+        """Simulate pressing a physical preset button, with a brief crossfade."""
+        if self._preset_key is None or preset is None:
+            return
+        if self._slave_mode:
+            await self._master.async_preset_button(preset)
+            return
+        if not (0 < int(preset) <= self._preset_key):
+            _LOGGER.warning(
+                "Wrong preset number %s. Device: %s, has to be integer between 1 and %s",
+                self.entity_id, preset, self._preset_key,
+            )
+            return
+        await self._async_crossfade_switch(self._async_preset_button_impl(preset))
+
+    async def _async_preset_button_impl(self, preset):
+        value = await self.call_linkplay_httpapi(f"MCUKeyShortClick:{preset!s}", None)
+        if value != "OK":
+            _LOGGER.warning(
+                "Failed to recall preset %s. Device: %s, Got response: %s",
+                self.entity_id, preset, value,
+            )
 
     async def async_play_track(self, track):
         """Play media track by name found in the tracks list."""

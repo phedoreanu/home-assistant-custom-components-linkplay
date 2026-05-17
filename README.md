@@ -55,6 +55,7 @@ Each device can be configured individually via the "Configure" button on the int
 - **Multiroom Wi-Fi Direct**: Toggle to use Wi-Fi Direct (AP mode) for multiroom instead of Router mode.
 - **Turn Off LED**: Toggle to turn off the front LED (supported devices only).
 - **Volume Step Size**: Set the percentage step for volume changes (1-25).
+- **Crossfade (ms)**: Soften the abrupt audio cut when switching source / preset / URL by ramping the volume down → switching → ramping back up. Default 300 ms; set to 0 to disable. Total wall time added per switch is roughly the configured value plus a 200 ms settle gap.
 
 ### YAML Configuration (Legacy)
 **Note:** YAML configuration is supported but considered legacy. Prefer the UI for new setups. Some advanced fields (`sources`, `common_sources`, `lastfm_api_key`, `uuid`) are only available via YAML; the UI options flow exposes only the most common ones. Unique IDs are now based on device UUIDs, not IP addresses.

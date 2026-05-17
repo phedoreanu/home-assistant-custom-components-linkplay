@@ -29,10 +29,12 @@ from .const import (
     CONF_MULTIROOM_WIFIDIRECT,
     CONF_LEDOFF,
     CONF_VOLUME_STEP,
+    CONF_CROSSFADE_MS,
     DEFAULT_ICECAST_UPDATE,
     DEFAULT_MULTIROOM_WIFIDIRECT,
     DEFAULT_LEDOFF,
     DEFAULT_VOLUME_STEP,
+    DEFAULT_CROSSFADE_MS,
     ICECAST_METADATA_MODES,
 )
 
@@ -350,6 +352,10 @@ class LinkplayOptionsFlow(config_entries.OptionsFlow):
             CONF_VOLUME_STEP,
             entry.data.get(CONF_VOLUME_STEP, DEFAULT_VOLUME_STEP)
         )
+        current_crossfade_ms = entry.options.get(
+            CONF_CROSSFADE_MS,
+            entry.data.get(CONF_CROSSFADE_MS, DEFAULT_CROSSFADE_MS)
+        )
 
         schema = vol.Schema(
             {
@@ -365,6 +371,9 @@ class LinkplayOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_VOLUME_STEP, default=current_vol_step
                 ): vol.All(int, vol.Range(min=1, max=25)),
+                vol.Optional(
+                    CONF_CROSSFADE_MS, default=current_crossfade_ms
+                ): vol.All(int, vol.Range(min=0, max=2000)),
             }
         )
 
