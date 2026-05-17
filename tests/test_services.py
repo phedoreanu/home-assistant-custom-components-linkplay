@@ -35,7 +35,13 @@ class MockLinkplayDevice:
         self._is_master = False
         self._slave_mode = False
         self._multiroom_group: list[str] = []
-        self.async_set_volume_level = AsyncMock()
+        self.volume_level: float | None = None
+        # Make async_set_volume_level update volume_level too so tests
+        # that issue multiple group-volume calls see the delta-shift
+        # against the value left behind by the previous call.
+        async def _set(level: float) -> None:
+            self.volume_level = level
+        self.async_set_volume_level = AsyncMock(side_effect=_set)
 
     @property
     def is_master(self) -> bool:
@@ -320,6 +326,186 @@ class TestSetGroupVolumeService:
                 },
                 blocking=True,
             )
+
+    @pytest.mark.asyncio
+    async def test_delta_shift_preserves_slave_offsets(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Master moves +0.20; each slave shifts by the same +0.20 from its
+        own current volume, preserving the offset captured at group time."""
+        master, (kitchen, bedroom) = _make_group(
+            hass,
+            "media_player.living_room",
+            ["media_player.kitchen", "media_player.bedroom"],
+        )
+        master.volume_level = 0.40
+        kitchen.volume_level = 0.30  # -0.10 offset
+        bedroom.volume_level = 0.60  # +0.20 offset
+        await async_setup_services(hass)
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_GROUP_VOLUME,
+            {
+                ATTR_ENTITY_ID: "media_player.living_room",
+                ATTR_VOLUME: 0.60,
+            },
+            blocking=True,
+        )
+
+        master.async_set_volume_level.assert_called_once_with(0.60)
+        kitchen.async_set_volume_level.assert_called_once_with(
+            pytest.approx(0.50)
+        )
+        bedroom.async_set_volume_level.assert_called_once_with(
+            pytest.approx(0.80)
+        )
+
+    @pytest.mark.asyncio
+    async def test_delta_shift_clamps_slave_at_upper_bound(
+        self, hass: HomeAssistant
+    ) -> None:
+        master, (kitchen,) = _make_group(
+            hass, "media_player.living_room", ["media_player.kitchen"]
+        )
+        master.volume_level = 0.50
+        kitchen.volume_level = 0.90
+        await async_setup_services(hass)
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_GROUP_VOLUME,
+            {
+                ATTR_ENTITY_ID: "media_player.living_room",
+                ATTR_VOLUME: 0.90,  # +0.40 delta -> kitchen would be 1.30
+            },
+            blocking=True,
+        )
+
+        master.async_set_volume_level.assert_called_once_with(0.90)
+        kitchen.async_set_volume_level.assert_called_once_with(1.0)
+
+    @pytest.mark.asyncio
+    async def test_delta_shift_clamps_slave_at_lower_bound(
+        self, hass: HomeAssistant
+    ) -> None:
+        master, (kitchen,) = _make_group(
+            hass, "media_player.living_room", ["media_player.kitchen"]
+        )
+        master.volume_level = 0.50
+        kitchen.volume_level = 0.10
+        await async_setup_services(hass)
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_GROUP_VOLUME,
+            {
+                ATTR_ENTITY_ID: "media_player.living_room",
+                ATTR_VOLUME: 0.20,  # -0.30 delta -> kitchen would be -0.20
+            },
+            blocking=True,
+        )
+
+        master.async_set_volume_level.assert_called_once_with(0.20)
+        kitchen.async_set_volume_level.assert_called_once_with(0.0)
+
+    @pytest.mark.asyncio
+    async def test_offsets_override_delta_for_listed_speakers(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Speakers in volume_offsets get ``volume + offset`` absolute;
+        speakers not listed still follow the delta-shift."""
+        master, (kitchen, bedroom) = _make_group(
+            hass,
+            "media_player.living_room",
+            ["media_player.kitchen", "media_player.bedroom"],
+        )
+        master.volume_level = 0.40
+        kitchen.volume_level = 0.30  # delta-shift candidate
+        bedroom.volume_level = 0.60  # overridden
+        await async_setup_services(hass)
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_GROUP_VOLUME,
+            {
+                ATTR_ENTITY_ID: "media_player.living_room",
+                ATTR_VOLUME: 0.60,  # delta = +0.20
+                ATTR_VOLUME_OFFSETS: {"media_player.bedroom": 10},  # absolute
+            },
+            blocking=True,
+        )
+
+        master.async_set_volume_level.assert_called_once_with(0.60)
+        kitchen.async_set_volume_level.assert_called_once_with(
+            pytest.approx(0.50)
+        )
+        bedroom.async_set_volume_level.assert_called_once_with(
+            pytest.approx(0.70)
+        )
+
+    @pytest.mark.asyncio
+    async def test_master_in_offsets_still_pinned_to_volume(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Master entity passed inside volume_offsets must still land on
+        `volume`, not `volume + offset` - otherwise a stray master entry
+        would double-shift the master's own slider."""
+        master, (kitchen,) = _make_group(
+            hass, "media_player.living_room", ["media_player.kitchen"]
+        )
+        master.volume_level = 0.30
+        kitchen.volume_level = 0.30
+        await async_setup_services(hass)
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_GROUP_VOLUME,
+            {
+                ATTR_ENTITY_ID: "media_player.living_room",
+                ATTR_VOLUME: 0.50,
+                ATTR_VOLUME_OFFSETS: {"media_player.living_room": 20},
+            },
+            blocking=True,
+        )
+
+        master.async_set_volume_level.assert_called_once_with(0.50)
+
+    @pytest.mark.asyncio
+    async def test_volume_offsets_emits_deprecation_warning_once_per_entity(
+        self, hass: HomeAssistant
+    ) -> None:
+        import warnings
+
+        _make_group(
+            hass, "media_player.living_room", ["media_player.kitchen"]
+        )
+        await async_setup_services(hass)
+
+        call_payload = {
+            ATTR_ENTITY_ID: "media_player.living_room",
+            ATTR_VOLUME: 0.50,
+            ATTR_VOLUME_OFFSETS: {"media_player.kitchen": 10},
+        }
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            await hass.services.async_call(
+                DOMAIN, SERVICE_SET_GROUP_VOLUME, call_payload, blocking=True,
+            )
+            await hass.services.async_call(
+                DOMAIN, SERVICE_SET_GROUP_VOLUME, call_payload, blocking=True,
+            )
+
+        deprecation_count = sum(
+            1
+            for w in caught
+            if issubclass(w.category, DeprecationWarning)
+            and "volume_offsets is deprecated" in str(w.message)
+        )
+        assert deprecation_count == 1, (
+            f"expected one DeprecationWarning across two calls; got {deprecation_count}"
+        )
 
     @pytest.mark.asyncio
     async def test_invalid_offset_types_raise(self, hass: HomeAssistant) -> None:

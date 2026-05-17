@@ -828,6 +828,7 @@ class LinkPlayDevice(
                     self._media_image_url = None
                     self._icecast_name = None
                     self._playing_tts = False
+                    self._somafm_cached_station = None
 
                 if self._playing_localfile and self._state in [STATE_PLAYING, STATE_PAUSED] and not self._playing_tts:
                     await self.async_get_playerstatus_metadata(self._player_statdata)
@@ -861,18 +862,32 @@ class LinkPlayDevice(
                     # and rely on the @Throttle cache between fetches.
                     raw_title = self._player_statdata.get('Title', '')
                     decoded_title = decode_hex_utf8(raw_title) if raw_title else ''
-                    # Detect SomaFM from either the raw playerstatus Title
-                    # (populated after a station change) or the current
-                    # _media_title (populated by UPnP DIDL on initial
-                    # playback when playerstatus Title is still empty).
-                    # Without the second check, fresh playback never
-                    # triggers the SomaFM JSON fetch until the user
-                    # switches stations.
-                    somafm_title = decoded_title or (self._media_title or '')
+                    # Detection priority:
+                    #   1. raw playerstatus Title (most authoritative,
+                    #      populated after a station change),
+                    #   2. previously-detected cached station name
+                    #      (sticky: survives _media_title being
+                    #      overwritten with the track title by a
+                    #      successful SomaFM JSON fetch),
+                    #   3. current _media_title (bootstraps detection
+                    #      from UPnP DIDL on the first poll after
+                    #      pressing play, when raw Title is still empty).
+                    somafm_title = (
+                        decoded_title
+                        or self._somafm_cached_station
+                        or self._media_title
+                        or ''
+                    )
                     is_somafm = somafm_channel_slug(somafm_title) is not None
 
                     if is_somafm:
-                        station_changed = somafm_title != self._somafm_cached_station
+                        # Compare case-insensitively: firmware sometimes
+                        # alternates casing of the same station name
+                        # between polls ("Beat Blender" vs "beat blender"),
+                        # which would otherwise trigger a "station changed"
+                        # storm and wipe the artist on every cycle.
+                        cached_norm = (self._somafm_cached_station or "").lower()
+                        station_changed = somafm_title.lower() != cached_norm
                         if station_changed:
                             # Drop the now-stale track info from the
                             # previous station so the card doesn't show
@@ -1362,6 +1377,7 @@ class LinkPlayDevice(
             self._media_artist = None
             self._media_album = None
             self._icecast_name = None
+            self._somafm_cached_station = None
             self._playhead_position = 0
             self._duration = 0
             self._trackc = None

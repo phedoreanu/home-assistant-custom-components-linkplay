@@ -15,6 +15,7 @@ Fully compatible with [Mini Media Player card](https://github.com/kalkih/mini-me
 - [Configuration](#configuration)
 - [Services](#services)
 - [Multiroom](#multiroom)
+- [SomaFM track metadata](#somafm-track-metadata)
 - [Presets](#presets)
 - [Specific commands](#specific-commands)
 - [Snapshot and restore](#snapshot-and-restore)
@@ -154,7 +155,7 @@ _Note:_ **Don't** use HTTP**S** streams. Linkplay chipsets seem to have limited 
 | `linkplay.snapshot` | `entity_id` | `switchinput` (default `True`) | Save player state for later restore |
 | `linkplay.restore` | `entity_id` | — | Restore previously snapshotted state |
 | `linkplay.play_track` | `entity_id`, `track` | — | Play a track from a template URL |
-| `linkplay.set_group_volume` | `entity_id` (master), `volume` (0.0–1.0) | `volume_offsets` (dict of `entity_id: offset`) | Set base + per-speaker volume across the group |
+| `linkplay.set_group_volume` | `entity_id` (master), `volume` (0.0–1.0) | `volume_offsets` (deprecated) | Set master volume; each slave shifts by the same delta, mini-media-player style |
 
 Home Assistant standard services `media_player.join`, `media_player.unjoin`, `media_player.volume_set`, `media_player.play_media`, `media_player.select_source`, etc. are also supported. Cards like mini-media-player use these.
 
@@ -196,101 +197,58 @@ It's also possible to use Home Assistant's [standard multiroom](https://www.home
 
 *Tip*: if you experience temporary `Unavailable` status on the slaves after unjoining from a multiroom group in router mode, run once the Linkplay-specific command `RouterMultiroomEnable` - see details further down.
 
-### Example Usage of the New set_group_volume Service
+### Group volume (`linkplay.set_group_volume`)
 
-Set the volume for all devices in a multiroom group:
+Mirrors how mini-media-player's group slider works: `volume` is applied to the **master** speaker and every slave shifts by the **same delta** (new master − old master) from its current volume. Each slave keeps its relative offset from the master. Final values are clamped to `[0.0, 1.0]`.
 
 ```yaml
 service: linkplay.set_group_volume
 data:
-  entity_id: media_player.living_room  # The master device
-  volume: 0.5  # 50% volume
+  entity_id: media_player.living_room   # master of the group
+  volume: 0.5                           # new master volume; slaves shift by the delta
 ```
 
-#### With Volume Offsets
+Example: master is at 0.40, kitchen at 0.30 (-0.10 offset), bedroom at 0.60 (+0.20 offset). Calling the service with `volume: 0.60` (delta +0.20) sets master → 0.60, kitchen → 0.50, bedroom → 0.80. A slave already at 1.0 stays at 1.0 when the master goes up; when the master comes back down the slave drops normally from there.
 
-Set different volumes for each speaker in the group:
+#### Automation example
+
+```yaml
+automation:
+  - alias: "Quieter at night"
+    trigger:
+      - platform: time
+        at: "22:00:00"
+    action:
+      - service: linkplay.set_group_volume
+        data:
+          entity_id: media_player.living_room
+          volume: 0.2
+```
+
+#### `volume_offsets` (deprecated)
+
+The original API took a `volume_offsets` dict of per-entity adjustments relative to a base volume. It still works for backwards compatibility — listed speakers are placed at `volume + offset` (clamped) and skip the delta-shift — but new automations should prefer the standard `media_player.volume_set` per entity if they need explicit per-speaker control.
 
 ```yaml
 service: linkplay.set_group_volume
 data:
   entity_id: media_player.living_room
-  volume: 0.5  # Base volume at 50%
+  volume: 0.5
   volume_offsets:
-    media_player.kitchen: 10      # Kitchen at 60% (50% + 10%)
-    media_player.bedroom: -15     # Bedroom at 35% (50% - 15%)
-    media_player.bathroom: 5      # Bathroom at 55% (50% + 5%)
+    media_player.kitchen: 10      # absolute: 0.5 + 0.10 = 0.60
+    media_player.bedroom: -15     # absolute: 0.5 - 0.15 = 0.35
 ```
 
-#### Automation Example
+Offsets accept integer percentages (-100 to 100) or fractional values (-1.0 to 1.0). Mixed within a call is fine. Offsets are not persisted; they apply only to that service call.
 
-Automatically adjust group volume based on time of day:
 
-```yaml
-automation:
-  - alias: "Morning Music Volume"
-    trigger:
-      - platform: time
-        at: "07:00:00"
-    action:
-      - service: linkplay.set_group_volume
-        data:
-          entity_id: media_player.living_room
-          volume: 0.3  # Quieter in the morning
-          volume_offsets:
-            media_player.bedroom: -10  # Even quieter in bedroom
-            media_player.kitchen: 5    # Slightly louder in kitchen
-  
-  - alias: "Evening Music Volume"
-    trigger:
-      - platform: time
-        at: "18:00:00"
-    action:
-      - service: linkplay.set_group_volume
-        data:
-          entity_id: media_player.living_room
-          volume: 0.6  # Louder in the evening
-          volume_offsets:
-            media_player.bedroom: -5
-            media_player.kitchen: 10
-```
+## SomaFM track metadata
 
-#### Script Example
+LinkPlay's TuneIn integration on most firmwares (AudioPro A36 and similar) only proxies the station name — actual track artist/title are not exposed via `getPlayerStatus` or UPnP DIDL. When the integration detects a SomaFM station playing (anything matching `SomaFM: <Channel>`), it fetches now-playing JSON directly from `https://somafm.com/songs/<channel>.json` and surfaces artist, title, album and per-track album art on the media card.
 
-Create a reusable script for party mode:
+Channel slugs are resolved via `https://somafm.com/channels.json` (cached for the lifetime of the HA process), so stations like `SomaFM: Space Station Soma` correctly map to the `spacestation` slug. The channel cover art is used as a stable fallback when the current track has no per-song album art.
 
-```yaml
-script:
-  party_mode:
-    sequence:
-      - service: linkplay.join
-        data:
-          master: media_player.living_room
-          entity_id:
-            - media_player.kitchen
-            - media_player.bedroom
-            - media_player.bathroom
-      
-      - delay:
-          seconds: 2
-      
-      - service: linkplay.set_group_volume
-        data:
-          entity_id: media_player.living_room
-          volume: 0.7
-          volume_offsets:
-            media_player.kitchen: 10      # Kitchen louder
-            media_player.bedroom: -20     # Bedroom much quieter
-            media_player.bathroom: 0      # Bathroom same as main
-```
-
-## Notes
-
-- Volume offsets support integer percentage values from -100 to +100, or fractional values from -1.0 to +1.0
-- The final volume for each device is clamped between 0.0 and 1.0
-- Offsets are applied only for the current service call; they are not persisted or exposed as device attributes
-- The service can be called on any member of an active multiroom group; the `entity_id` is used as the reference device for the base group volume
-
+Nothing to configure — it activates automatically for any SomaFM preset played through TuneIn. Throttled to one fetch every 5 seconds per device; metadata appears within ~6 seconds of pressing play.
 
 ## Presets
 

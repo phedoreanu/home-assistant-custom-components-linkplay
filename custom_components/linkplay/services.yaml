@@ -150,19 +150,22 @@ play_track:
 
 set_group_volume:
   name: Set Group Volume
-  description: Set volume for all speakers in a multiroom group with optional individual offsets for each speaker.
+  description: >-
+    Set the master volume and shift every slave by the same delta, the way
+    mini-media-player's group slider works. Each slave keeps its current
+    offset relative to the master and is clamped to [0.0, 1.0].
   fields:
     entity_id:
-      name: Entity ID
-      description: Entity ID of any speaker in the multiroom group (master or member).
+      name: Master Entity ID
+      description: Master speaker of the multiroom group. The new volume is applied here; slaves shift by the same delta.
       example: media_player.sound_room1
       required: true
       selector:
         entity:
           integration: linkplay
     volume:
-      name: Base Volume
-      description: Base volume level (0.0 to 1.0) to set for all speakers in the group.
+      name: Master Volume
+      description: New volume for the master (0.0 to 1.0). Each slave moves by the same delta from its current volume.
       example: 0.5
       required: true
       selector:
@@ -172,8 +175,12 @@ set_group_volume:
           step: 0.01
           mode: slider
     volume_offsets:
-      name: Volume Offsets
-      description: Optional dictionary of entity_id to volume offset. Use percentage values (-100 to 100) as integers or fractional values (-1.0 to 1.0) as floats for individual speakers. Example (percentage) - media_player.kitchen:-10, media_player.living_room:20
+      name: Volume Overrides (deprecated)
+      description: >-
+        Deprecated. Optional dict ``{entity_id: offset}`` (percentages -100..100
+        or fractions -1.0..1.0). When set, those members ignore the delta-shift
+        and are placed at ``volume + offset`` (clamped). Prefer
+        ``media_player.volume_set`` per entity for explicit control.
       example: '{"media_player.kitchen": -10, "media_player.living_room": 20}'
       required: false
       selector:
