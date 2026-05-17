@@ -1,21 +1,29 @@
 {
   "domain": "linkplay",
   "name": "Linkplay",
-  "version": "4.0.0-beta.1",
-  "documentation": "https://github.com/phedoreanu/home-assistant-custom-components-linkplay",
-  "issue_tracker": "https://github.com/phedoreanu/home-assistant-custom-components-linkplay/issues",
   "after_dependencies": ["http", "tts", "media_source"],
-  "config_flow": true,
-  "iot_class": "local_polling",
   "codeowners": [
     "@nicjo814",
     "@limych",
-    "@phedoreanu",
+    "@nagyrobi",
     "@phedoreanu"
   ],
+  "config_flow": true,
+  "documentation": "https://github.com/phedoreanu/home-assistant-custom-components-linkplay",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/phedoreanu/home-assistant-custom-components-linkplay/issues",
   "requirements": [
     "async-upnp-client>=0.27",
     "validators~=0.12",
     "chardet>=4.0.0"
+  ],
+  "ssdp": [
+    {"manufacturer": "Linkplay"},
+    {"manufacturer": "LinkPlay"},
+    {"deviceType": "urn:schemas-upnp-org:device:MediaRenderer:1", "manufacturer": "Linkplay Technology Inc."}
+  ],
+  "version": "4.0.33",
+  "zeroconf": [
+    {"type": "_linkplay._tcp.local."}
   ]
 }

@@ -147,3 +147,35 @@ play_track:
       required: true
       selector:
         text:
+
+set_group_volume:
+  name: Set Group Volume
+  description: Set volume for all speakers in a multiroom group with optional individual offsets for each speaker.
+  fields:
+    entity_id:
+      name: Entity ID
+      description: Entity ID of any speaker in the multiroom group (master or member).
+      example: media_player.sound_room1
+      required: true
+      selector:
+        entity:
+          integration: linkplay
+    volume:
+      name: Base Volume
+      description: Base volume level (0.0 to 1.0) to set for all speakers in the group.
+      example: 0.5
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 0.01
+          mode: slider
+    volume_offsets:
+      name: Volume Offsets
+      description: Optional dictionary of entity_id to volume offset. Use percentage values (-100 to 100) as integers or fractional values (-1.0 to 1.0) as floats for individual speakers. Example (percentage) - media_player.kitchen:-10, media_player.living_room:20
+      example: '{"media_player.kitchen": -10, "media_player.living_room": 20}'
+      required: false
+      selector:
+        object:
+

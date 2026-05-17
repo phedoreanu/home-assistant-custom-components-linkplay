@@ -11,6 +11,7 @@ import logging
 from typing import Any
 from urllib.parse import urlparse
 
+import aiohttp
 import voluptuous as vol
 
 from homeassistant import config_entries
@@ -288,7 +289,7 @@ class LinkplayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             session = async_get_clientsession(self.hass)
             url = f"{protocol}://{host}/httpapi.asp?command=getStatus"
 
-            async with session.get(url, ssl=False, timeout=5) as response:
+            async with session.get(url, ssl=False, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 if response.status == 200:
                     data = await response.json(content_type=None)
                     # Extract UUID and device name from response
@@ -318,6 +319,7 @@ class LinkplayOptionsFlow(config_entries.OptionsFlow):
 
     def __init__(self, entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
+        # Stored for backward compatibility; prefer self.config_entry.
         self.entry = entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -325,22 +327,28 @@ class LinkplayOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
+        # Prefer base-class accessor when available (HA sets _config_entry_id
+        # only when the flow is started through async_init).
+        try:
+            entry = self.config_entry
+        except (AttributeError, ValueError):
+            entry = self.entry
         # Get current values or defaults
-        current_icecast = self.entry.options.get(
+        current_icecast = entry.options.get(
             CONF_ICECAST_METADATA,
-            self.entry.data.get(CONF_ICECAST_METADATA, DEFAULT_ICECAST_UPDATE)
+            entry.data.get(CONF_ICECAST_METADATA, DEFAULT_ICECAST_UPDATE)
         )
-        current_wifidirect = self.entry.options.get(
+        current_wifidirect = entry.options.get(
             CONF_MULTIROOM_WIFIDIRECT,
-            self.entry.data.get(CONF_MULTIROOM_WIFIDIRECT, DEFAULT_MULTIROOM_WIFIDIRECT)
+            entry.data.get(CONF_MULTIROOM_WIFIDIRECT, DEFAULT_MULTIROOM_WIFIDIRECT)
         )
-        current_ledoff = self.entry.options.get(
+        current_ledoff = entry.options.get(
             CONF_LEDOFF,
-            self.entry.data.get(CONF_LEDOFF, DEFAULT_LEDOFF)
+            entry.data.get(CONF_LEDOFF, DEFAULT_LEDOFF)
         )
-        current_vol_step = self.entry.options.get(
+        current_vol_step = entry.options.get(
             CONF_VOLUME_STEP,
-            self.entry.data.get(CONF_VOLUME_STEP, DEFAULT_VOLUME_STEP)
+            entry.data.get(CONF_VOLUME_STEP, DEFAULT_VOLUME_STEP)
         )
 
         schema = vol.Schema(

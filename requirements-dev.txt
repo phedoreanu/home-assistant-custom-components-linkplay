@@ -1,19 +1,9 @@
 # Development dependencies
-ruff>=0.1.0
 black>=23.0.0
 mypy>=1.5.0
 pre-commit>=3.0.0
 
-# Note: homeassistant is NOT included here to avoid dependency conflicts
-# The pytest-homeassistant-custom-component package provides HA test fixtures
-# For running against a real HA instance, use the HA Core dev environment
-
-# Note: pytest-xdist removed - included in pytest-homeassistant-custom-component
-
-# Integration runtime dependencies (matches manifest.json)
-async-upnp-client>=0.27
-validators~=0.12
-chardet>=4.0.0
-
-# Documentation
-markdown>=3.4.0
+# Note: homeassistant is NOT included here to avoid dependency conflicts.
+# Use pytest-homeassistant-custom-component (see requirements-test.txt) for tests.
+# Runtime deps live in manifest.json — do not duplicate here.
+# ruff lives in requirements-test.txt with the active pin.

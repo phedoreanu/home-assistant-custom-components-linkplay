@@ -1,45 +1,69 @@
 # Linkplay-based speakers and sound devices
 
-**NOTE: WIP**
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://github.com/hacs/integration)
+[![GitHub Release](https://img.shields.io/github/v/release/phedoreanu/home-assistant-custom-components-linkplay?style=for-the-badge)](https://github.com/phedoreanu/home-assistant-custom-components-linkplay/releases)
 
-To switch to the official LinkPlay integration starting from **2024.08**, follow these steps:
-* Remove the current `linkplay` configuration from your configuration.yaml.
-* Restart Home-Assistant.
-* Delete the custom component through HACS or manually by deleting the `custom_components/linkplay` folder.
-* Restart Home-Assistant again. Your players will be automatically discovered, a notification popup will inform you on this.
+Home Assistant custom integration for audio devices based on the Linkplay A31 chipset (Arylic, August, Audio Pro, iEAST, and many other brands — full list at the bottom).
 
-For any bugs, feature requests, or PRs, please use the official Home Assistant channels.
+Originally developed by nicjo814, maintained by limych, archived by nagyrobi, now maintained by phedoreanu.
 
----
-**For Home Assistant versions before 2024.08:**
+Fully compatible with [Mini Media Player card](https://github.com/kalkih/mini-media-player) by kalkih, including speaker group management.
 
-This component allows you to integrate control of audio devices based on Linkplay A31 chipset into your [Home Assistant](http://www.home-assistant.io) smart home system. 
-Originally developed by nicjo814, maintained by limych, archived by nagyrobi, and now maintained by phedoreanu.
-Read more about Linkplay at the bottom of this file.
+## Contents
 
-Fully compatible with [Mini Media Player card for Lovelace UI](https://github.com/kalkih/mini-media-player) by kalkih, including speaker group management.
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Services](#services)
+- [Multiroom](#multiroom)
+- [Presets](#presets)
+- [Specific commands](#specific-commands)
+- [Snapshot and restore](#snapshot-and-restore)
+- [Service call examples](#service-call-examples)
+- [Automation examples](#automation-examples)
+- [About Linkplay](#about-linkplay)
+- [License](#home-assistant-component-license)
 
 ## Installation
-[![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg?style=for-the-badge)](https://github.com/hacs/integration)
-* Install using HACS, or manually: copy all files in `custom_components/linkplay` to your `<config directory>/custom_components/linkplay/` directory.
-* Restart Home-Assistant.
-* Add the configuration to your configuration.yaml.
-* Restart Home-Assistant again.
 
-[Support forum](https://community.home-assistant.io/t/linkplay-integration/33878/133)
+### Via HACS (Recommended)
+1. Open HACS in Home Assistant.
+2. Go to "Integrations" section.
+3. Click the 3 dots in the top right corner and select "Custom repositories".
+4. Add `https://github.com/phedoreanu/home-assistant-custom-components-linkplay` as an "Integration".
+5. Search for "Linkplay" and install it.
+6. Restart Home Assistant.
 
-### Configuration
+### Manual Installation
+1. Copy all files in `custom_components/linkplay` to your `<config directory>/custom_components/linkplay/` directory.
+2. Restart Home Assistant.
 
-It is recommended to create static DHCP leases in your network router to ensure the devices always get the same IP address. Recent models versions allow setting static IP address, if you see that option, use it.
+## Configuration
 
-To add Linkplay units to your installation, add the following to your `configuration.yaml` file:
+### UI Configuration (Recommended)
+Devices are automatically discovered via SSDP/Zeroconf. You should see them appear in **Settings → Devices & Services → Integrations**.
+
+If a device is not discovered automatically:
+1. Go to **Settings → Devices & Services**.
+2. Click **+ ADD INTEGRATION** button.
+3. Search for "Linkplay".
+4. Select it and follow the instructions to add your device by IP address.
+
+### Options (Advanced Settings)
+Each device can be configured individually via the "Configure" button on the integration card:
+- **Icecast Metadata**: Choose between `Off`, `StationName`, or `StationNameSongTitle`.
+- **Multiroom Wi-Fi Direct**: Toggle to use Wi-Fi Direct (AP mode) for multiroom instead of Router mode.
+- **Turn Off LED**: Toggle to turn off the front LED (supported devices only).
+- **Volume Step Size**: Set the percentage step for volume changes (1-25).
+
+### YAML Configuration (Legacy)
+**Note:** YAML configuration is supported but considered legacy. Prefer the UI for new setups. Some advanced fields (`sources`, `common_sources`, `lastfm_api_key`, `uuid`) are only available via YAML; the UI options flow exposes only the most common ones. Unique IDs are now based on device UUIDs, not IP addresses.
 
 ```yaml
 # Example configuration.yaml entry
 media_player:
     - platform: linkplay
       host: 192.168.1.11
-      protocol: https
+      protocol: http
       name: Sound Room1
       volume_step: 10
       icecast_metadata: 'StationNameSongTitle'
@@ -52,17 +76,9 @@ media_player:
           'udisk': 'USB stick',
           'http://94.199.183.186:8000/jazzy-soul.mp3': 'Jazzy Soul',
         }
-
-    - platform: linkplay
-      host: 192.168.1.12
-      name: Sound Room2
-      uuid: 'FF31F09E82A6BBC1A2CB6D80'
-      icecast_metadata: 'Off'  # valid values: 'Off', 'StationName', 'StationNameSongTitle'
-      sources: {}
-      common_sources: !include linkplay-radio-sources.yaml
 ```
 
-### Configuration Variables
+### Configuration Variables (YAML)
 
 **host:**  
   *(string)* *(Required)* The IP address of the Linkplay unit. Note that using a hostname will not work with a few commands, e.g., joining multiroom groups.
@@ -102,10 +118,10 @@ The sources can be renamed to your preference (change only the part _after_ **:*
 ```
 If you don't want a source selector to be available at all, set option to empty: `sources: {}`.
 
-_Note:_ **Don't** use HTTP**S** streams. Linkplay chipsets seem to have limited supporrt for HTTPS. Besides, using HTTPS is useless in practice for a public webradio stream, it's a waste of computig resources for this kind of usage both on server and player side.
+_Note:_ **Don't** use HTTP**S** streams. Linkplay chipsets seem to have limited support for HTTPS. Besides, using HTTPS is useless in practice for a public webradio stream — it wastes computing resources on both server and player.
 
 **common_sources:**  
-  *(list)* *(Optional)* Another list with sources which should appear on the device. Useful if you have multiple devices on the network and you'd like to maintain a common list of http-based internet radio stream sources for all of them in a single file with `!include linkplay-radio-sources.yaml`. The included file should be in the same place as the main config file containing `linkplay` platform.   
+  *(list)* *(Optional)* Another list with sources which should appear on the device. Useful if you have multiple devices on the network, and you'd like to maintain a common list of http-based internet radio stream sources for all of them in a single file with `!include linkplay-radio-sources.yaml`. The included file should be in the same place as the main config file containing `linkplay` platform.   
   For example:
 ```yaml
 {
@@ -115,7 +131,7 @@ _Note:_ **Don't** use HTTP**S** streams. Linkplay chipsets seem to have limited 
 ```
 
 **icecast_metadata:**  
-  *(string)* *(Optional)* When playing icecast webradio streams, how to handle metadata. Valid values here are `'Off'`, `'StationName'`, `'StationNameSongTitle'`, defaulting to `'StationName'` when not set. With `'Off'`, Home Assistant will not try do request any metadata from the IceCast server. With `'StationName'`, Home Assistant will request only once when starting the playback the stream name from the headers, and display it in the `media_title` property of the player. With `'StationNameSongTitle'` Home Assistant will request the stream server periodically for icy-metadata, and read out `StreamTitle`, trying to figure out correct values for `media_title` and `media_artist`, in order to gather cover art information from LastFM service (see below). Note that metadata retrieval success depends on how the icecast radio station servers and encoders are configured, if they don't provide proper infos or they don't display correctly, it's better to turn it off or just use StationName to save server load. There's no standard way enforced on the servers, it's up to the server maintainers how it works.
+  *(string)* *(Optional)* When playing icecast webradio streams, how to handle metadata. Valid values here are `'Off'`, `'StationName'`, `'StationNameSongTitle'`, defaulting to `'StationName'` when not set. With `'Off'`, Home Assistant will not try to request any metadata from the IceCast server. With `'StationName'`, Home Assistant will request only once when starting the playback the stream name from the headers, and display it in the `media_title` property of the player. With `'StationNameSongTitle'` Home Assistant will request the stream server periodically for icy-metadata, and read out `StreamTitle`, trying to figure out correct values for `media_title` and `media_artist`, in order to gather cover art information from LastFM service (see below). Note that metadata retrieval success depends on how the icecast radio station servers and encoders are configured, if they don't provide proper infos, or they don't display correctly, it's better to turn it off or just use StationName to save server load. There's no standard way enforced on the servers, it's up to the server maintainers how it works.
 
 **lastfm_api_key:**  
   *(string)* *(Optional)* API key to LastFM service to get album covers. Register for one.
@@ -127,11 +143,37 @@ _Note:_ **Don't** use HTTP**S** streams. Linkplay chipsets seem to have limited 
   *(boolean)* *(Optional)* Set to `True` to turn off the LED on the front panel of the Arylic devices (works only for this brand).
 
 
+## Services
+
+| Service | Required fields | Optional fields | Purpose |
+|---|---|---|---|
+| `linkplay.join` | `entity_id` (slaves), `master` | — | Add slaves to a multiroom group |
+| `linkplay.unjoin` | `entity_id` | — | Leave a multiroom group (master ungroups all) |
+| `linkplay.play_preset` | `entity_id`, `preset_number` | — | Recall a saved device preset |
+| `linkplay.command` | `entity_id`, `command` | `notify` (default `True`) | Execute a raw LinkPlay API command |
+| `linkplay.snapshot` | `entity_id` | `switchinput` (default `True`) | Save player state for later restore |
+| `linkplay.restore` | `entity_id` | — | Restore previously snapshotted state |
+| `linkplay.play_track` | `entity_id`, `track` | — | Play a track from a template URL |
+| `linkplay.set_group_volume` | `entity_id` (master), `volume` (0.0–1.0) | `volume_offsets` (dict of `entity_id: offset`) | Set base + per-speaker volume across the group |
+
+Home Assistant standard services `media_player.join`, `media_player.unjoin`, `media_player.volume_set`, `media_player.play_media`, `media_player.select_source`, etc. are also supported. Cards like mini-media-player use these.
+
+### linkplay.play_track
+
+Plays a track from a templated URL — useful for dynamically composed stream URLs:
+```yaml
+    - service: linkplay.play_track
+      data:
+        entity_id: media_player.sound_room1
+        track: "http://my.server.tld/{{ states('input_select.station') }}.mp3"
+```
+
+
 ## Multiroom
 
 Linkplay devices support multiroom in two modes:
-- WiFi direct mode, where the master turns into a hidden AP and the slaves connect directly to it. The advantage is that this is a dedicated direct connection between the speakers, with network parameters optimized by the factory for streaming. Disadvantage is that switching of the stream is slower, plus the coverage can be limited due to the building's specifics. _This is the default method used by the Android app to create multirooms._
-- Router mode, where the master and slaves connect to each other through the local network (from firmware `v4.2.8020` up). The advantage is that all speakers remain connected to the existing network, swicthing the stream happens faster, and the coverage can be bigger being ensured by the network infrastructure of the building (works through multiple interconnected APs and switches). Disadvantage is that the network is not dedicated and it's the user responsibility to provide proper network infrastructure for reliable streaming. _This only works through this component and it's the preferred mode._
+- Wi-Fi direct mode, where the master turns into a hidden AP and the slaves connect directly to it. The advantage is that this is a dedicated direct connection between the speakers, with network parameters optimized by the factory for streaming. Disadvantage is that switching of the stream is slower, plus the coverage can be limited due to the building's specifics. _This is the default method used by the Android app to create multirooms._
+- Router mode, where the master and slaves connect to each other through the local network (from firmware `v4.2.8020` up). The advantage is that all speakers remain connected to the existing network, switching the stream happens faster, and the coverage can be bigger being ensured by the network infrastructure of the building (works through multiple interconnected APs and switches). Disadvantage is that the network is not dedicated, and it's the user responsibility to provide proper network infrastructure for reliable streaming. _This only works through this component, and it's the preferred mode._
 
 This integration will autodetect the firmware version running on the player and choose multiroom mode accordingly. Units with firmware version lower than `v4.2.8020` can connect to multirooms _only in wifi-direct mode_. Firmware version number can be seen in device attributes. If the user has a mix of players running old and new firmware, autodetection can be overriden with option `multiroom_wifidirect: True`, and is needed only for units with newer versions, to force them down to wifi-direct multiroom.
 
@@ -152,18 +194,114 @@ These services are compatible out of the box with the speaker group object in @k
 
 It's also possible to use Home Assistant's [standard multiroom](https://www.home-assistant.io/integrations/media_player/#service-media_playerjoin) join and unjoin functions for multiroom control.
 
-*Tip*: if you experience temporary `Unavailable` status on the slaves afer unjoining from a multiroom group in router mode, run once the Linkplay-specific command `RouterMultiroomEnable` - see details further down.
+*Tip*: if you experience temporary `Unavailable` status on the slaves after unjoining from a multiroom group in router mode, run once the Linkplay-specific command `RouterMultiroomEnable` - see details further down.
+
+### Example Usage of the New set_group_volume Service
+
+Set the volume for all devices in a multiroom group:
+
+```yaml
+service: linkplay.set_group_volume
+data:
+  entity_id: media_player.living_room  # The master device
+  volume: 0.5  # 50% volume
+```
+
+#### With Volume Offsets
+
+Set different volumes for each speaker in the group:
+
+```yaml
+service: linkplay.set_group_volume
+data:
+  entity_id: media_player.living_room
+  volume: 0.5  # Base volume at 50%
+  volume_offsets:
+    media_player.kitchen: 10      # Kitchen at 60% (50% + 10%)
+    media_player.bedroom: -15     # Bedroom at 35% (50% - 15%)
+    media_player.bathroom: 5      # Bathroom at 55% (50% + 5%)
+```
+
+#### Automation Example
+
+Automatically adjust group volume based on time of day:
+
+```yaml
+automation:
+  - alias: "Morning Music Volume"
+    trigger:
+      - platform: time
+        at: "07:00:00"
+    action:
+      - service: linkplay.set_group_volume
+        data:
+          entity_id: media_player.living_room
+          volume: 0.3  # Quieter in the morning
+          volume_offsets:
+            media_player.bedroom: -10  # Even quieter in bedroom
+            media_player.kitchen: 5    # Slightly louder in kitchen
+  
+  - alias: "Evening Music Volume"
+    trigger:
+      - platform: time
+        at: "18:00:00"
+    action:
+      - service: linkplay.set_group_volume
+        data:
+          entity_id: media_player.living_room
+          volume: 0.6  # Louder in the evening
+          volume_offsets:
+            media_player.bedroom: -5
+            media_player.kitchen: 10
+```
+
+#### Script Example
+
+Create a reusable script for party mode:
+
+```yaml
+script:
+  party_mode:
+    sequence:
+      - service: linkplay.join
+        data:
+          master: media_player.living_room
+          entity_id:
+            - media_player.kitchen
+            - media_player.bedroom
+            - media_player.bathroom
+      
+      - delay:
+          seconds: 2
+      
+      - service: linkplay.set_group_volume
+        data:
+          entity_id: media_player.living_room
+          volume: 0.7
+          volume_offsets:
+            media_player.kitchen: 10      # Kitchen louder
+            media_player.bedroom: -20     # Bedroom much quieter
+            media_player.bathroom: 0      # Bathroom same as main
+```
+
+## Notes
+
+- Volume offsets support integer percentage values from -100 to +100, or fractional values from -1.0 to +1.0
+- The final volume for each device is clamped between 0.0 and 1.0
+- Offsets are applied only for the current service call; they are not persisted or exposed as device attributes
+- The service can be called on any member of an active multiroom group; the `entity_id` is used as the reference device for the base group volume
+
 
 ## Presets
 
-Linkplay devices allow to save, using the control app on the phone/tablet, music presets (for example Spotify playlists) to be recalled for later listening. Recalling a preset from Home Assistant:
+Linkplay devices allow saving music presets (for example Spotify playlists) via the control app on the phone/tablet, to be recalled for later listening. Recall a preset from Home Assistant:
 ```yaml
-    - service: linkplay.preset
+    - service: linkplay.play_preset
       data:
         entity_id: media_player.sound_room1
-        preset: 1
+        preset_number: 1
 ```
-Preset count vary from device type to type, usually the phone app shows how many presets can be stored maximum. The integration detects the max number and the command only accepts numbers from the allowed range. You can specify multiple entity ids separated by comma or use `all` to run the service against.
+Preset count varies from device type to type, usually the phone app shows how many presets can be stored maximum. The integration detects the max number and the command only accepts numbers from the allowed range. You can specify multiple entity ids separated by comma or use `all` to run the service against.
 
 ## Specific commands
 
@@ -177,13 +315,13 @@ Linkplay devices support some commands through the API, this is a wrapper to be 
 ```
 Implemented commands:
 - `PromptEnable` and `PromptDisable` - enable or disable the audio prompts played through the speakers when connecting to the network or joining multiroom etc.
-- `"WriteDeviceNameToUnit: My Device Name"` - change the friendly name of the device both in firmware and in Home Assistant. Needs to be in qoutes.
-- `"SetApSSIDName: NewWifiName"` - change the SSID name of the AP created by the unit for wifidirect multiroom connections. Needs to be in qoutes.
+- `"WriteDeviceNameToUnit: My Device Name"` - change the friendly name of the device both in firmware and in Home Assistant. Needs to be in quotes.
+- `"SetApSSIDName: NewWifiName"` - change the SSID name of the AP created by the unit for wifidirect multiroom connections. Needs to be in quotes.
 - `SetRandomWifiKey`- perhaps as an extra security feature, one could make an automation to change the keys on the APs to some random values periodically.
 - `TimeSync` - is for units on networks not connected to internet to compensate for an unreachable NTP server. Correct time is needed for the alarm clock functionality (not implemented yet here).
 - `RouterMultiroomEnable` - router mode is available by default in firmwares above v4.2.8020, but there’s also a logic included to build it up, this command ensures to set the good priority. Only use if you have issues with multiroom in router mode.
 - `MCU+XXX+XXX` - passthrough for direct TCP UART commands [supported by the module](https://forum.arylic.com/t/home-assistant-integratio-available/729/23). Input not validated, use at your own risk.
-- `Rescan` - do not wait for the current 60 second throttle cycle to reconnect to the unavailable devices, trigger testing for availability immediately.
+- `Rescan` - do not wait for the current 60-second throttle cycle to reconnect to the unavailable devices, trigger testing for availability immediately.
 
 If parameter `notify: False` is omitted, results will appear in Lovelace UI's left pane as persistent notifications which can be dismissed. You can specify multiple entity ids separated by comma or use `all` to run the service against.
 
@@ -192,7 +330,7 @@ If parameter `notify: False` is omitted, results will appear in Lovelace UI's le
 These functions are useless since Home Assistant 2022.6 because this component has support for announcements so it does the snapshot and the restore automatically for any TTS message coming in.
 See below on how to call a TTS announcement service.
 
-To prepare the player to play TTS and save the current state of it for restoring afterwards, current playback will stop:
+To prepare the player to play TTS and save the current state of it for restoring afterward, current playback will stop:
 ```yaml
     - service: linkplay.snapshot
       data:
@@ -207,7 +345,7 @@ To restore the player state:
       data:
         entity_id: media_player.sound_room1
 ```
-You can specify multiple entity ids separated by comma or use `all` to run the service against. Currently the following state is being snapshotted/restored:
+You can specify multiple entity ids separated by comma or use `all` to run the service against. Currently, the following state is being snapshotted/restored:
 - Volume
 - Input source
 - Webradio stream (as long as it's configured as an input source)
@@ -331,19 +469,20 @@ There are quite a few manufacturers and devices that operate on the basis of Lin
 - etc.
 
 ## Home Assistant component authors & contributors
-    "@nicjo814",
-    "@limych",
-    "@nagyrobi"
-    "@phedoreanu"
+
+- @nicjo814 (original)
+- @limych
+- @nagyrobi
+- @phedoreanu (current maintainer)
 
 ## Home Assistant component License
 
 MIT License
 
-- Copyright (c) 2019 Niclas Berglind nicjo814
-- Copyright (c) 2019—2020 Andrey "Limych" Khrolenok
-- Copyright (c) 2020 nagyrobi Robert Horvath-Arkosi
-- Copyright (c) 2026 phedoreanu
+- Copyright © 2019 Niclas Berglind nicjo814
+- Copyright © 2019—2020 Andrey "Limych" Khrolenok
+- Copyright © 2020 nagyrobi Robert Horvath-Arkosi
+- Copyright © 2026 phedoreanu
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

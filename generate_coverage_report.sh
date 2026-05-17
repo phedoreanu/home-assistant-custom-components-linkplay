@@ -4,7 +4,7 @@
 
 set -e
 
-echo "🧪 Linkplay Config Flow - Test Coverage Report Generator"
+echo "🧪 Linkplay - Test Coverage Report Generator"
 echo "=========================================================="
 echo ""
 
@@ -19,7 +19,7 @@ echo ""
 
 # Run tests with coverage
 pytest tests/ \
-  --cov=custom_components.linkplay.config_flow \
+  --cov=custom_components.linkplay \
   --cov-report=term-missing \
   --cov-report=html \
   --cov-report=json \

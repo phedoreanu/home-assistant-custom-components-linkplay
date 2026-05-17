@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from ipaddress import IPv4Address
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -432,7 +431,7 @@ class TestLinkplayConfigFlow:
                 ) as mock_update:
                     mock_update.return_value = {"type": "abort", "reason": "reconfigure_successful"}
 
-                    result = await flow.async_step_reconfigure(
+                    await flow.async_step_reconfigure(
                         user_input={
                             CONF_HOST: "192.168.1.101",
                             CONF_PROTOCOL: "https",

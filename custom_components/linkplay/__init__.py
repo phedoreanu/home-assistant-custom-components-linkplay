@@ -6,13 +6,28 @@ https://github.com/phedoreanu/home-assistant-custom-components-linkplay
 """
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
+
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_ENTITY_ID, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
+
+
+def _read_manifest_version() -> str:
+    """Return the integration version from manifest.json."""
+    try:
+        manifest_path = Path(__file__).with_name("manifest.json")
+        return json.loads(manifest_path.read_text()).get("version", "unknown")
+    except Exception:
+        return "unknown"
+
+
+VERSION = _read_manifest_version()
 
 DOMAIN = 'linkplay'
 PLATFORMS = [Platform.MEDIA_PLAYER]
@@ -23,8 +38,8 @@ SERVICE_PRESET = 'play_preset'
 SERVICE_CMD = 'command'
 SERVICE_SNAP = 'snapshot'
 SERVICE_REST = 'restore'
-SERVICE_LIST = 'get_tracks'
 SERVICE_PLAY = 'play_track'
+SERVICE_SET_GROUP_VOLUME = 'set_group_volume'
 
 ATTR_MASTER = 'master'
 ATTR_PRESET = 'preset_number'
@@ -34,6 +49,8 @@ ATTR_SNAP = 'switchinput'
 ATTR_SELECT = 'input_select'
 ATTR_SOURCE = 'source'
 ATTR_TRACK = 'track'
+ATTR_VOLUME = 'volume'
+ATTR_VOLUME_OFFSETS = 'volume_offsets'
 
 SERVICE_SCHEMA = vol.Schema({
     vol.Optional(ATTR_ENTITY_ID): cv.comp_entity_ids
@@ -68,7 +85,17 @@ PLYTRK_SERVICE_SCHEMA = vol.Schema({
     vol.Required(ATTR_TRACK): cv.template
 })
 
+SET_GROUP_VOLUME_SCHEMA = vol.Schema({
+    vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+    vol.Required(ATTR_VOLUME): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
+    vol.Optional(ATTR_VOLUME_OFFSETS): dict,
+})
+
 _LOGGER = logging.getLogger(__name__)
+
+# No top-level YAML configuration for the integration itself — YAML users
+# still configure entities via the media_player platform schema.
+CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 
 class LinkPlayData:
@@ -81,26 +108,25 @@ class LinkPlayData:
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Linkplay component from YAML configuration."""
     hass.data.setdefault(DOMAIN, LinkPlayData())
-
-    # Register services
+    _LOGGER.info("Linkplay integration v%s loaded (YAML)", VERSION)
     await async_setup_services(hass)
-
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Linkplay from a config entry."""
     hass.data.setdefault(DOMAIN, LinkPlayData())
+    _LOGGER.info(
+        "Linkplay integration v%s loading entry %r",
+        VERSION, entry.title,
+    )
 
-    # Forward the setup to the media_player platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Register services if not already registered
     if not hass.services.has_service(DOMAIN, SERVICE_JOIN):
         await async_setup_services(hass)
 
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
-
     return True
 
 
@@ -112,6 +138,14 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+    if unload_ok and not hass.config_entries.async_entries(DOMAIN):
+        for service in (
+            SERVICE_JOIN, SERVICE_UNJOIN, SERVICE_PRESET, SERVICE_CMD,
+            SERVICE_SNAP, SERVICE_REST, SERVICE_PLAY, SERVICE_SET_GROUP_VOLUME,
+        ):
+            if hass.services.has_service(DOMAIN, service):
+                hass.services.async_remove(DOMAIN, service)
 
     return unload_ok
 
@@ -129,6 +163,8 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         if entity_ids:
             if entity_ids == 'all':
                 entity_ids = [e.entity_id for e in entities]
+            elif isinstance(entity_ids, str):
+                entity_ids = [entity_ids]
             entities = [e for e in entities if e.entity_id in entity_ids]
 
         if service.service == SERVICE_JOIN:
@@ -188,6 +224,87 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                     _LOGGER.debug("**PLAY TRACK** entity: %s; track: %s", device.entity_id, track)
                     await device.async_play_track(track)
 
+        elif service.service == SERVICE_SET_GROUP_VOLUME:
+            volume = service.data.get(ATTR_VOLUME)
+            volume_offsets = service.data.get(ATTR_VOLUME_OFFSETS, {})
+
+            # Convert percentage-style offsets (integers) to fractional offsets (floats)
+            # Percentages are in range -100 to 100 and are given as integers.
+            # Fractional offsets are in range -1.0 to 1.0 and are given as floats.
+            # Note: Percentages represent percentage points (e.g., 10 = +0.10), not multipliers.
+            converted_offsets = {}
+            for entity_id, offset in volume_offsets.items():
+                # Check for boolean values first (bool is a subclass of int in Python)
+                if isinstance(offset, bool):
+                    _LOGGER.error(
+                        "Invalid type bool for volume offset %s for entity %s; "
+                        "expected int (percentage) or float (fractional).",
+                        offset,
+                        entity_id,
+                    )
+                    raise ValueError(
+                        f"Invalid type bool for volume offset {offset} for entity {entity_id}; "
+                        "expected int (percentage) or float (fractional)."
+                    )
+                # If offset is an integer, interpret it as a percentage and convert to fractional
+                elif isinstance(offset, int):
+                    # Validate percentage range
+                    if offset < -100 or offset > 100:
+                        _LOGGER.error(
+                            "Invalid volume offset percentage %s for entity %s; expected -100 to 100",
+                            offset,
+                            entity_id,
+                        )
+                        raise ValueError(
+                            f"Invalid volume offset percentage {offset} for entity {entity_id}; "
+                            "expected value between -100 and 100."
+                        )
+                    converted_offsets[entity_id] = offset / 100.0
+                elif isinstance(offset, float):
+                    # Already in fractional format; validate expected range -1.0 to 1.0
+                    if offset < -1.0 or offset > 1.0:
+                        _LOGGER.error(
+                            "Invalid fractional volume offset %s for entity %s; expected -1.0 to 1.0",
+                            offset,
+                            entity_id,
+                        )
+                        raise ValueError(
+                            f"Invalid fractional volume offset {offset} for entity {entity_id}; "
+                            "expected value between -1.0 and 1.0."
+                        )
+                    converted_offsets[entity_id] = offset
+                else:
+                    # Reject unsupported types with a clear error
+                    _LOGGER.error(
+                        "Invalid type %s for volume offset %s for entity %s; "
+                        "expected int (percentage) or float (fractional).",
+                        type(offset).__name__,
+                        offset,
+                        entity_id,
+                    )
+                    raise ValueError(
+                        f"Invalid type {type(offset).__name__} for volume offset "
+                        f"{offset} for entity {entity_id}; expected int (percentage) "
+                        "or float (fractional)."
+                    )
+
+            # Find the master device from the entity_ids
+            master_device = None
+            for device in entities:
+                if device.entity_id in entity_ids:
+                    master_device = device
+                    break
+
+            if master_device:
+                _LOGGER.debug(
+                    "**SET GROUP VOLUME** master: %s; volume: %s; offsets: %s (converted: %s)",
+                    master_device.entity_id,
+                    volume,
+                    volume_offsets,
+                    converted_offsets
+                )
+                await master_device.async_set_group_volume(volume, converted_offsets)
+
     # Register all services
     hass.services.async_register(
         DOMAIN, SERVICE_JOIN, async_service_handle, schema=JOIN_SERVICE_SCHEMA)
@@ -203,3 +320,5 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         DOMAIN, SERVICE_REST, async_service_handle, schema=REST_SERVICE_SCHEMA)
     hass.services.async_register(
         DOMAIN, SERVICE_PLAY, async_service_handle, schema=PLYTRK_SERVICE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, SERVICE_SET_GROUP_VOLUME, async_service_handle, schema=SET_GROUP_VOLUME_SCHEMA)

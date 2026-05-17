@@ -16,6 +16,12 @@ aresponses>=2.1.6
 freezegun>=1.2.2
 zeroconf
 
+# Integration runtime dependencies (mirror manifest.json) so that tests
+# can import custom_components.linkplay.media_player.
+async-upnp-client>=0.27
+validators~=0.12
+chardet>=4.0.0
+
 # Code quality
 flake8>=6.0.0
 ruff>=0.4.2
