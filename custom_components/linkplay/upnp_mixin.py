@@ -62,11 +62,15 @@ class LinkPlayUPnPMixin:
             # unescaped ampersands or non-Latin chars that the stdlib
             # XML parser rejects. Bail rather than killing the whole
             # poll cycle so the caller can fall through to other
-            # metadata sources.
-            _LOGGER.debug(
-                "Invalid DIDL-Lite XML from %s: %s",
-                self.entity_id, error,
-            )
+            # metadata sources. Only log the first occurrence of each
+            # unique error per entity to avoid filling the log.
+            error_key = (self.entity_id, str(error))
+            if error_key != getattr(self, "_last_didl_parse_error", None):
+                _LOGGER.debug(
+                    "Invalid DIDL-Lite XML from %s: %s",
+                    self.entity_id, error,
+                )
+                self._last_didl_parse_error = error_key
             return
 
         self._media_title = None

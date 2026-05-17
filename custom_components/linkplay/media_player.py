@@ -500,6 +500,9 @@ class LinkPlayDevice(
         # Last SomaFM station name we fetched track info for; used to
         # bypass the SomaFM @Throttle when the user switches stations.
         self._somafm_cached_station: str | None = None
+        # Most-recent (mode, status, totlen, Title, Artist, Album) tuple
+        # we logged; used to suppress repeating per-poll debug lines.
+        self._last_poll_snapshot: tuple | None = None
         self._snapshot_active = False
         self._snap_source = None
         self._snap_uri = None
@@ -537,8 +540,6 @@ class LinkPlayDevice(
                     self._protocol = "http"
                 else:
                     return False
-
-        #_LOGGER.debug("01 Start update %s, %s", self.entity_id, self._name)
         # If we believe we are a slave but the python ref to the master has
         # been lost (e.g. master entity reloaded), try to re-resolve it from
         # the registered entities before assuming we're no longer in a group.
@@ -583,7 +584,6 @@ class LinkPlayDevice(
 
         # if self._wait_for_mcu > 0:  # have waited for the hardware unit to finish processing command, otherwise some reported status values will be incorrect
             # await asyncio.sleep(self._wait_for_mcu)
-            # self._wait_for_mcu = 0
 
         if self._unav_throttle:
             await self.async_get_status()
@@ -597,7 +597,6 @@ class LinkPlayDevice(
         if isinstance(self._player_statdata, dict):
             self._unav_throttle = False
             if self._first_update or (self._state == STATE_UNAVAILABLE or self._multiroom_wifidirect):
-                #_LOGGER.debug("03 Update first time getStatus %s, %s", self.entity_id, self._name)
                 if self._protocol == "https":
                     device_status = await self.call_linkplay_httpapi("getStatusEx", True)
                 else:
@@ -676,8 +675,6 @@ class LinkPlayDevice(
             if not self._is_master and not self._slave_mode:
                 self._master = None
                 self._multiroom_group = []
-
-            #_LOGGER.debug("04 Update VOL, Shuffle, Repeat, STATE %s, %s", self.entity_id, self._name)
             self._volume = self._player_statdata['vol']
             self._muted = bool(int(self._player_statdata['mute']))
             self._sound_mode = SOUND_MODES.get(self._player_statdata['eq'])
@@ -695,52 +692,47 @@ class LinkPlayDevice(
                 '5': RepeatMode.ONE,
             }.get(self._player_statdata['loop'], RepeatMode.OFF)
 
-            # self._state = {
-                # 'stop': STATE_IDLE,
-                # 'load': STATE_PLAYING,
-                # 'play': STATE_PLAYING,
-                # 'pause': STATE_PAUSED,
-            # }.get(self._player_statdata['status'], STATE_IDLE)
-
             if self._player_statdata['mode'] in ['-1', '0', '99'] or self._player_statdata['status'] == 'stop':
                 if utcnow() >= (self._idletime_updated_at + AUTOIDLE_STATE_TIMEOUT):
                     self._state = STATE_IDLE
-                    #_LOGGER.debug("05 DETECTED %s, %s", self.entity_id, self._state)
             elif self._player_statdata['status'] in ['play', 'load']:
                 self._state = STATE_PLAYING
-                #_LOGGER.debug("05 DETECTED %s, %s", self.entity_id, self._state)
             elif self._player_statdata['status'] == 'pause':
                 self._state = STATE_PAUSED
-                #_LOGGER.debug("05 DETECTED %s, %s", self.entity_id, self._state)
 
             if self._state in [STATE_PLAYING, STATE_PAUSED]:
                 self._duration = int(int(self._player_statdata['totlen']) / 1000)
                 self._playhead_position = int(int(self._player_statdata['curpos']) / 1000)
-                #_LOGGER.debug("04 Update DUR, POS %s, %s, %s, %s, %s", self.entity_id, self._name, self._state, self._duration, self._playhead_position)
             else:
                 self._duration = 0
                 self._playhead_position = 0
 
-            _LOGGER.debug(
-                "[%s @ %s] poll mode=%s status=%s totlen=%s curpos=%s uri=%r "
-                "Title=%r Artist=%r Album=%r",
-                self._name, self._host,
+            # Per-poll debug is rate-limited to actual state changes so the
+            # 3s scan interval doesn't fill the log with identical lines.
+            poll_snapshot = (
                 self._player_statdata.get('mode'),
                 self._player_statdata.get('status'),
                 self._player_statdata.get('totlen'),
-                self._player_statdata.get('curpos'),
-                self._player_statdata.get('uri'),
                 self._player_statdata.get('Title'),
                 self._player_statdata.get('Artist'),
                 self._player_statdata.get('Album'),
             )
+            if poll_snapshot != self._last_poll_snapshot:
+                _LOGGER.debug(
+                    "[%s @ %s] poll mode=%s status=%s totlen=%s uri=%r "
+                    "Title=%r Artist=%r Album=%r",
+                    self._name, self._host,
+                    *poll_snapshot[:3],
+                    self._player_statdata.get('uri'),
+                    *poll_snapshot[3:],
+                )
+                self._last_poll_snapshot = poll_snapshot
             self._playing_spotify = bool(self._player_statdata['mode'] == '31')
             self._playing_liveinput = self._player_statdata['mode'] in SOURCES_LIVEIN
             self._playing_stream = self._player_statdata['mode'] in SOURCES_STREAM
             self._playing_localfile = self._player_statdata['mode'] in SOURCES_LOCALF
 
             if bool(self._player_statdata['mode'] != '10'):
-                #self._playing_tts = False
                 self._playing_mediabrowser = False
 
             if not (self._playing_liveinput or self._playing_stream or self._playing_spotify):
@@ -759,7 +751,6 @@ class LinkPlayDevice(
                 pass
 
             if self._media_uri:
-                #_LOGGER.debug("07 Detect CDN %s, %s", self.entity_id, self._name)
                 # Detect web music service by their CDN subdomains in the URL
                 # Tidal, Deezer
                 self._playing_webplaylist = \
@@ -768,7 +759,6 @@ class LinkPlayDevice(
                     bool(self._media_uri.find('.deezer.') != -1)
 
             if not self._playing_webplaylist:
-                #_LOGGER.debug("07 Set Name to Source: %s, %s", self.entity_id, self._name)
                 source_t = SOURCES_MAP.get(self._player_statdata['mode'], 'Network')
                 source_n = None
                 if source_t == 'Network':
@@ -785,7 +775,6 @@ class LinkPlayDevice(
                 self._source = 'Web playlist'
 
             if self._source != 'Network' and not (self._playing_stream or self._playing_localfile or self._playing_spotify):
-                #_LOGGER.debug("08 Line Inputs: %s, %s", self.entity_id, self._name)
                 if self._source == 'Idle':
                     self._state = STATE_IDLE
                     self._media_title = None
@@ -799,7 +788,6 @@ class LinkPlayDevice(
                 self._icecast_name = None
 
             if self._player_statdata['mode'] in ['1', '2', '3']:
-                #_LOGGER.debug("08 Line Inputs name playing: %s, %s", self.entity_id, self._name)
                 self._state = STATE_PLAYING
                 self._media_title = self._source
 
@@ -819,7 +807,6 @@ class LinkPlayDevice(
                     await self.async_tracklist_via_upnp("USB")
 
             if self._playing_spotify:
-                #_LOGGER.debug("09 it's playing spotify: %s, %s", self.entity_id, self._name)
                 if self._state != STATE_IDLE:
                     await self.async_update_via_upnp()
                 if self._state == STATE_PAUSED:
@@ -828,15 +815,11 @@ class LinkPlayDevice(
                 else:
                     self._spotify_paused_at = None
             # else:
-                # self._trackc = None
-                # self._media_uri_final = None
-
             elif self._playing_webplaylist:
                 if self._state != STATE_IDLE:
                     await self.async_update_via_upnp()
 
             else:
-                #_LOGGER.debug("09 it's playing something else: %s, %s", self.entity_id, self._name)
                 self._spotify_paused_at = None
                 if self._state not in [STATE_PLAYING, STATE_PAUSED]:
                     self._media_title = None
@@ -847,7 +830,6 @@ class LinkPlayDevice(
                     self._playing_tts = False
 
                 if self._playing_localfile and self._state in [STATE_PLAYING, STATE_PAUSED] and not self._playing_tts:
-                    #_LOGGER.debug("10 Update async_get_playerstatus_metadata FILE %s, %s", self.entity_id, self._name)
                     await self.async_get_playerstatus_metadata(self._player_statdata)
 
                     if self._media_title is not None and self._media_artist is None:
@@ -865,7 +847,6 @@ class LinkPlayDevice(
                         self._media_title = self._source
 
                 elif self._state == STATE_PLAYING and self._media_uri and int(self._player_statdata['totlen']) > 0 and not self._snapshot_active and not self._playing_tts and not self._playing_mediabrowser:
-                    #_LOGGER.debug("10 Update async_get_playerstatus_metadata media_URI %s, %s", self.entity_id, self._name)
                     if not self._nometa:
                         await self.async_get_playerstatus_metadata(self._player_statdata)
 
@@ -880,20 +861,28 @@ class LinkPlayDevice(
                     # and rely on the @Throttle cache between fetches.
                     raw_title = self._player_statdata.get('Title', '')
                     decoded_title = decode_hex_utf8(raw_title) if raw_title else ''
-                    is_somafm = somafm_channel_slug(decoded_title) is not None
+                    # Detect SomaFM from either the raw playerstatus Title
+                    # (populated after a station change) or the current
+                    # _media_title (populated by UPnP DIDL on initial
+                    # playback when playerstatus Title is still empty).
+                    # Without the second check, fresh playback never
+                    # triggers the SomaFM JSON fetch until the user
+                    # switches stations.
+                    somafm_title = decoded_title or (self._media_title or '')
+                    is_somafm = somafm_channel_slug(somafm_title) is not None
 
                     if is_somafm:
-                        station_changed = decoded_title != self._somafm_cached_station
+                        station_changed = somafm_title != self._somafm_cached_station
                         if station_changed:
                             # Drop the now-stale track info from the
                             # previous station so the card doesn't show
                             # "Drone Zone" with "Kodomo / Spira
                             # Mirabilis" while Beat Blender is loading.
-                            self._media_title = string.capwords(decoded_title)
+                            self._media_title = string.capwords(somafm_title)
                             self._media_artist = None
                             self._media_album = None
                             self._media_image_url = None
-                            self._somafm_cached_station = decoded_title
+                            self._somafm_cached_station = somafm_title
                             # Bypass @Throttle so the new station's
                             # track shows up on the next render.
                             result = await self.async_update_from_somafm(no_throttle=True)
@@ -901,13 +890,10 @@ class LinkPlayDevice(
                             result = await self.async_update_from_somafm()
 
                         if result is None:
-                            # Throttled: previous artist + title still in place.
+                            # Throttled: previous artist + title still
+                            # in place. No log here - per-poll trace
+                            # is suppressed via the poll-snapshot dedupe.
                             got_meta = self._media_artist is not None
-                            _LOGGER.debug(
-                                "[%s @ %s] SomaFM throttled, keeping cached title=%r artist=%r",
-                                self._name, self._host,
-                                self._media_title, self._media_artist,
-                            )
                         else:
                             got_meta = bool(result)
                             _LOGGER.debug(
@@ -919,41 +905,31 @@ class LinkPlayDevice(
                             )
                     else:
                         # Non-SomaFM live stream: cheapest-first chain.
-                        _LOGGER.debug(
-                            "[%s @ %s] live-stream metadata uri=%s upnp=%s",
-                            self._name, self._host, self._media_uri_final,
-                            self._upnp_device is not None,
-                        )
+                        # Run silently; result is captured by the next
+                        # per-poll snapshot. Detailed trace fires only
+                        # once per metadata change.
+                        prev = (self._media_title, self._media_artist)
                         got_meta = await self.async_get_playerstatus_metadata(self._player_statdata)
-                        _LOGGER.debug(
-                            "[%s @ %s]   playerstatus -> title=%r artist=%r ok=%s",
-                            self._name, self._host,
-                            self._media_title, self._media_artist, got_meta,
-                        )
                         if not got_meta and self._upnp_device is not None:
                             try:
                                 await self.async_update_via_upnp()
                             except Exception as error:
                                 _LOGGER.debug(
-                                    "[%s @ %s]   UPnP DIDL    -> exception: %s",
+                                    "[%s @ %s] UPnP DIDL exception: %s",
                                     self._name, self._host, error,
                                 )
                             got_meta = self._media_title is not None and self._media_artist is not None
-                            _LOGGER.debug(
-                                "[%s @ %s]   UPnP DIDL    -> title=%r artist=%r ok=%s",
-                                self._name, self._host,
-                                self._media_title, self._media_artist, got_meta,
-                            )
                         if not got_meta and self._media_uri_final:
                             if self._ice_skip_throt:
                                 await self.async_update_from_icecast(no_throttle=True)
                                 self._ice_skip_throt = False
                             else:
                                 await self.async_update_from_icecast()
+                        new = (self._media_title, self._media_artist)
+                        if new != prev:
                             _LOGGER.debug(
-                                "[%s @ %s]   icy headers  -> title=%r artist=%r",
-                                self._name, self._host,
-                                self._media_title, self._media_artist,
+                                "[%s @ %s] live-stream metadata changed: %r -> %r",
+                                self._name, self._host, prev, new,
                             )
 
                 elif self._state == STATE_PLAYING and self._playing_mediabrowser and self._media_source_uri is not None:
@@ -962,7 +938,6 @@ class LinkPlayDevice(
 
                 self._new_song = await self.async_is_playing_new_track()
                 if self._lastfm_api_key is not None and self._new_song:
-                    #_LOGGER.debug("11 Update async_get_lastfm_coverart %s, %s", self.entity_id, self._name)
                     await self.async_get_lastfm_coverart()
 
             self._media_prev_artist = self._media_artist
@@ -1378,7 +1353,6 @@ class LinkPlayDevice(
 
             self._state = STATE_PLAYING
             if media_id.find('tts_proxy') != -1:
-                #_LOGGER.debug("Setting TTS: %s, %s", self.entity_id, self._name)
                 self._playing_tts = True
                 self._playing_mediabrowser = False
                 self._playing_stream = False
@@ -1471,9 +1445,7 @@ class LinkPlayDevice(
                 if value == "OK":
                     self._state = STATE_PLAYING
                     # if temp_source and temp_source in ['udisk', 'TFcard']:
-                        # self._wait_for_mcu = 2    # switching to locally stored files -> time to report correct volume value at update
                     # else:
-                        # self._wait_for_mcu = 0.6  # switching to a physical input -> time to report correct volume value at update
                     self._source = source
                     self._media_uri = None
                     self._media_uri_final = None
@@ -1487,8 +1459,6 @@ class LinkPlayDevice(
                             await slave.async_set_source(source)
                 else:
                     _LOGGER.warning("Failed to select source. Device: %s, Got response: %s", self.entity_id, value)
-
-            #await self.async_schedule_update_ha_state(True)
         else:
             await self._master.async_select_source(source)
 
@@ -1623,8 +1593,6 @@ class LinkPlayDevice(
             if not self._slave_mode:
                 if 0 < int(preset) <= self._preset_key:
                     value = await self.call_linkplay_httpapi(f"MCUKeyShortClick:{preset!s}", None)
-                    # self._wait_for_mcu = 2
-                    # await self.async_schedule_update_ha_state(True)
                     if value != "OK":
                         _LOGGER.warning("Failed to recall preset %s. " "Device: %s, Got response: %s", self.entity_id, preset, value)
                 else:
@@ -1656,7 +1624,6 @@ class LinkPlayDevice(
             else:
                 self._state = STATE_PLAYING
                 self._playing_tts = False
-                #self._wait_for_mcu = 0.4
                 self._media_title = None
                 self._media_artist = None
                 self._media_album = None

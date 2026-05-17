@@ -29,7 +29,12 @@ from homeassistant.util import Throttle
 
 _LOGGER = logging.getLogger(__name__)
 
-_SOMAFM_THROTTLE = timedelta(seconds=20)
+# Throttle the SomaFM now-playing fetch. Set tight enough that
+# track changes on the stream show up on the card within one poll
+# cycle, loose enough that we don't hit SomaFM 20 times per minute
+# while a track is mid-play (they don't aggressively rate-limit, but
+# it's still polite).
+_SOMAFM_THROTTLE = timedelta(seconds=5)
 _SOMAFM_NOW_PLAYING_URL = "https://somafm.com/songs/{channel}.json"
 _SOMAFM_CHANNELS_URL = "https://somafm.com/channels.json"
 _SOMAFM_PREFIX_RE = re.compile(r"^\s*somafm\s*[:\-]\s*(.+?)\s*$", re.IGNORECASE)
@@ -187,15 +192,25 @@ class LinkPlaySomaFmFetcherMixin:
         if not (title and artist):
             return False
 
+        prev = (self._media_title, self._media_artist)
         self._media_title = title
         self._media_artist = artist
         if album:
             self._media_album = album
         if albumart:
             self._media_image_url = albumart
-        _LOGGER.debug(
-            "[%s @ %s] SomaFM %s -> %r / %r (art=%s)",
-            self._name, self._host, slug, artist, title,
-            "track" if albumart else "channel" if channel_image else "none",
-        )
+        if (title, artist) != prev:
+            _LOGGER.debug(
+                "[%s @ %s] SomaFM %s -> %r / %r (art=%s)",
+                self._name, self._host, slug, artist, title,
+                "track" if albumart else "channel" if channel_image else "none",
+            )
+            # HA reads the entity state at the end of async_update, but
+            # pushing it now means the card reflects the new track
+            # without waiting for the surrounding update to finish.
+            if getattr(self, "hass", None) is not None:
+                try:
+                    self.async_write_ha_state()
+                except Exception:
+                    pass
         return True
