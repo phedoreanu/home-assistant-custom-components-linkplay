@@ -267,6 +267,83 @@ class TestUpdateFromSomafm:
         assert "mzstatic" in dev._media_image_url
 
     @pytest.mark.asyncio
+    async def test_itunes_art_persists_through_throttled_calls(self) -> None:
+        """Once iTunes has populated the cover for a track, subsequent
+        polls inside the same track must keep it - the SomaFM channel
+        logo cannot win just because iTunes' throttle returned False."""
+        dev = _make_device()
+        # Simulate state at the start of the second poll inside the
+        # same track: _media_title/_media_artist already match the
+        # SomaFM-resolved track from the previous poll.
+        dev._media_title = "Spira Mirabilis"
+        dev._media_artist = "Kodomo"
+        dev._somafm_cached_station = "SomaFM: Drone Zone"
+        # Pretend iTunes already populated the cover on the previous poll
+        dev._media_image_url = "https://is1.mzstatic.com/cover/600x600bb.jpg"
+
+        resp = MagicMock()
+        resp.status = 200
+        resp.json = AsyncMock(return_value={
+            "songs": [{
+                "title": "Spira Mirabilis",
+                "artist": "Kodomo",
+                "album": "Patterns and Light",
+            }]
+        })
+        session = MagicMock()
+        session.get = AsyncMock(return_value=resp)
+
+        # iTunes throttle returns False (same track, cached lookup)
+        dev.async_get_itunes_artwork = AsyncMock(return_value=False)
+
+        with patch(
+            "custom_components.linkplay.somafm_fetcher_mixin.async_get_clientsession",
+            return_value=session,
+        ):
+            ok = await dev.async_update_from_somafm.__wrapped__(dev)
+
+        assert ok is True
+        # iTunes art still in place, not clobbered by the station logo
+        assert "mzstatic" in dev._media_image_url
+
+    @pytest.mark.asyncio
+    async def test_track_change_drops_stale_art_before_resolving(self) -> None:
+        """When the track changes inside the same station, the previous
+        track's image is dropped before the resolution chain runs."""
+        dev = _make_device()
+        dev._media_title = "Old Track"  # prior poll's title
+        dev._media_artist = "Old Artist"
+        dev._somafm_cached_station = "SomaFM: Drone Zone"
+        dev._media_image_url = "https://is1.mzstatic.com/old/600x600bb.jpg"
+
+        resp = MagicMock()
+        resp.status = 200
+        resp.json = AsyncMock(return_value={
+            "songs": [{
+                "title": "Spira Mirabilis",  # different track
+                "artist": "Kodomo",
+                "album": "Patterns and Light",
+            }]
+        })
+        session = MagicMock()
+        session.get = AsyncMock(return_value=resp)
+
+        # iTunes lookup for the new track succeeds with fresh URL
+        def _itunes_set_new():
+            dev._media_image_url = "https://is1.mzstatic.com/new/600x600bb.jpg"
+            return True
+
+        dev.async_get_itunes_artwork = AsyncMock(side_effect=_itunes_set_new)
+
+        with patch(
+            "custom_components.linkplay.somafm_fetcher_mixin.async_get_clientsession",
+            return_value=session,
+        ):
+            ok = await dev.async_update_from_somafm.__wrapped__(dev)
+        assert ok is True
+        assert "new/600x600bb.jpg" in dev._media_image_url
+
+    @pytest.mark.asyncio
     async def test_somafm_albumart_used_when_itunes_fails(self) -> None:
         """When iTunes returns nothing, SomaFM's per-track ``albumart``
         is the next-best art source before the station logo."""

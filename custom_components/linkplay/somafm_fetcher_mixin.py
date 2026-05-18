@@ -153,12 +153,13 @@ class LinkPlaySomaFmFetcherMixin:
         if not slug:
             return False
 
-        # Use SomaFM's channel artwork as a stable station-level image
-        # so the card shows the right cover even on tracks where the
-        # per-track albumart isn't populated.
+        # Station-level artwork is the final fallback. We defer
+        # assigning it until after the per-track + iTunes lookups so
+        # we don't clobber a track-accurate cover that was set on a
+        # previous poll (the iTunes throttle returns None on the
+        # second call, so overwriting up-front would lose the art
+        # for the rest of the song).
         channel_image = (channel or {}).get("image")
-        if channel_image:
-            self._media_image_url = channel_image
 
         url = _SOMAFM_NOW_PLAYING_URL.format(channel=slug)
         try:
@@ -199,17 +200,32 @@ class LinkPlaySomaFmFetcherMixin:
             return False
 
         prev = (self._media_title, self._media_artist)
+        track_changed = (title, artist) != prev
         self._media_title = title
         self._media_artist = artist
         if album:
             self._media_album = album
+
+        # On every fresh track inside the same station, drop the prior
+        # cover before resolving a new one - otherwise either the
+        # previous track's iTunes art or the station logo lingers when
+        # the new resolution chain returns nothing.
+        if track_changed:
+            self._media_image_url = None
+
         # Artwork priority:
-        #   1. iTunes Search by (artist, title) - gives the real album
-        #      cover for the song actually playing.
+        #   1. iTunes Search by (artist, title) - the real album cover
+        #      for the song actually playing.
         #   2. SomaFM per-track ``albumart`` field - some channels
         #      populate it, most don't.
-        #   3. SomaFM channel image (already assigned above) as the
-        #      station-level fallback.
+        #   3. SomaFM channel image - station-level fallback so the
+        #      card never goes blank.
+        # iTunes is throttled to 4 s and caches per (artist, title);
+        # after the first successful lookup subsequent calls inside
+        # the same track return False/None. We only fall through to
+        # the next source when ``_media_image_url`` is still empty,
+        # so a sticky iTunes URL from a previous poll isn't clobbered
+        # by the station logo on the next poll inside the same track.
         itunes_ok = False
         itunes = getattr(self, "async_get_itunes_artwork", None)
         if itunes is not None:
@@ -220,8 +236,10 @@ class LinkPlaySomaFmFetcherMixin:
                     "[%s @ %s] iTunes art lookup raised: %s",
                     self._name, self._host, error,
                 )
-        if not itunes_ok and albumart:
+        if not itunes_ok and not self._media_image_url and albumart:
             self._media_image_url = albumart
+        if not self._media_image_url and channel_image:
+            self._media_image_url = channel_image
         if (title, artist) != prev:
             _LOGGER.debug(
                 "[%s @ %s] SomaFM %s -> %r / %r (art=%s)",
