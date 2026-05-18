@@ -190,6 +190,45 @@ class TestUpdateFromSomafm:
         assert dev._media_image_url == "https://api.somafm.com/img/spacestation600.jpg"
 
     @pytest.mark.asyncio
+    async def test_cached_station_drives_refetch_after_first_track(self) -> None:
+        """After the first successful fetch, ``_media_title`` is the
+        track name (not "SomaFM: <station>"), so the slug must be
+        derived from ``_somafm_cached_station`` instead - otherwise the
+        entity freezes on the first track of the session."""
+        dev = _make_device()
+        # State after the first fetch: _media_title is a track, sticky
+        # cached station retains the prefixed form.
+        dev._media_title = "Carbon Mind"
+        dev._media_artist = "Carbon Based Lifeforms"
+        dev._somafm_cached_station = "SomaFM: Groove Salad"
+
+        response = MagicMock()
+        response.status = 200
+        response.json = AsyncMock(return_value={
+            "songs": [{
+                "title": "New Track",
+                "artist": "New Artist",
+                "album": "New Album",
+            }]
+        })
+        session = MagicMock()
+        session.get = AsyncMock(return_value=response)
+
+        with patch(
+            "custom_components.linkplay.somafm_fetcher_mixin.async_get_clientsession",
+            return_value=session,
+        ):
+            ok = await dev.async_update_from_somafm.__wrapped__(dev)
+
+        assert ok is True
+        assert dev._media_title == "New Track"
+        assert dev._media_artist == "New Artist"
+        # The slug came from the cached station, not the track-flavoured
+        # _media_title.
+        called_url = session.get.await_args.args[0]
+        assert called_url == "https://somafm.com/songs/groovesalad.json"
+
+    @pytest.mark.asyncio
     async def test_http_error_returns_false_silently(self) -> None:
         dev = _make_device()
         dev._media_title = "SomaFM: Lush"

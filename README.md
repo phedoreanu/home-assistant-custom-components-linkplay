@@ -249,7 +249,7 @@ LinkPlay's TuneIn integration on most firmwares (AudioPro A36 and similar) only 
 
 Channel slugs are resolved via `https://somafm.com/channels.json` (cached for the lifetime of the HA process), so stations like `SomaFM: Space Station Soma` correctly map to the `spacestation` slug. The channel cover art is used as a stable fallback when the current track has no per-song album art.
 
-Nothing to configure — it activates automatically for any SomaFM preset played through TuneIn. Throttled to one fetch every 5 seconds per device; metadata appears within ~6 seconds of pressing play.
+Nothing to configure — it activates automatically for any SomaFM preset played through TuneIn. The fetcher polls every 5 seconds per device, so the displayed track refreshes within ~6 seconds of pressing play **and** between songs while the channel keeps playing.
 
 ## Presets
 

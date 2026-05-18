@@ -133,7 +133,13 @@ class LinkPlaySomaFmFetcherMixin:
 
         Returns True when artist + title were populated, False otherwise.
         """
-        title = _slug_from_title(self._media_title)
+        # Prefer the sticky cached station name: after the first
+        # successful fetch ``_media_title`` is the track title, not the
+        # "SomaFM: <station>" prefix, so deriving from it would freeze
+        # the entity on the first track of every session.
+        title = _slug_from_title(
+            getattr(self, "_somafm_cached_station", None)
+        ) or _slug_from_title(self._media_title)
         if title is None:
             return False
 

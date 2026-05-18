@@ -1356,11 +1356,11 @@ class LinkPlayDevice(
                 media_type = MediaType.URL
 
             if media_id_check.endswith('.m3u') or media_id_check.endswith('.m3u8'):
-                _LOGGER.debug("For: %s, Detected M3U list: %s, Media_id: %s", self._name, media_id)
+                _LOGGER.debug("For: %s, Detected M3U list, Media_id: %s", self._name, media_id)
                 media_id = await self.async_parse_m3u_url(media_id)
 
             if media_id_check.endswith('.pls'):
-                _LOGGER.debug("For: %s, Detected PLS list: %s, Media_id: %s", self._name, media_id)
+                _LOGGER.debug("For: %s, Detected PLS list, Media_id: %s", self._name, media_id)
                 media_id = await self.async_parse_pls_url(media_id)
 
             media_id_final = media_id
