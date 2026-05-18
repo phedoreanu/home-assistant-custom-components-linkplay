@@ -203,7 +203,24 @@ class LinkPlaySomaFmFetcherMixin:
         self._media_artist = artist
         if album:
             self._media_album = album
-        if albumart:
+        # Artwork priority:
+        #   1. iTunes Search by (artist, title) - gives the real album
+        #      cover for the song actually playing.
+        #   2. SomaFM per-track ``albumart`` field - some channels
+        #      populate it, most don't.
+        #   3. SomaFM channel image (already assigned above) as the
+        #      station-level fallback.
+        itunes_ok = False
+        itunes = getattr(self, "async_get_itunes_artwork", None)
+        if itunes is not None:
+            try:
+                itunes_ok = bool(await itunes())
+            except Exception as error:
+                _LOGGER.debug(
+                    "[%s @ %s] iTunes art lookup raised: %s",
+                    self._name, self._host, error,
+                )
+        if not itunes_ok and albumart:
             self._media_image_url = albumart
         if (title, artist) != prev:
             _LOGGER.debug(

@@ -229,6 +229,76 @@ class TestUpdateFromSomafm:
         assert called_url == "https://somafm.com/songs/groovesalad.json"
 
     @pytest.mark.asyncio
+    async def test_itunes_called_first_then_used_when_successful(self) -> None:
+        """iTunes is the primary artwork source; SomaFM's per-track
+        ``albumart`` is the fallback when iTunes returns nothing."""
+        dev = _make_device()
+        dev._media_title = "SomaFM: Drone Zone"
+        dev._somafm_cached_station = "SomaFM: Drone Zone"
+
+        resp = MagicMock()
+        resp.status = 200
+        resp.json = AsyncMock(return_value={
+            "songs": [{
+                "title": "Spira Mirabilis",
+                "artist": "Kodomo",
+                "album": "Patterns and Light",
+                # SomaFM albumart present, but iTunes wins
+                "albumart": "https://api.somafm.com/img/somafm-track.jpg",
+            }]
+        })
+        session = MagicMock()
+        session.get = AsyncMock(return_value=resp)
+
+        def _itunes_success():
+            dev._media_image_url = "https://is1.mzstatic.com/cover/600x600bb.jpg"
+            return True
+
+        dev.async_get_itunes_artwork = AsyncMock(side_effect=_itunes_success)
+
+        with patch(
+            "custom_components.linkplay.somafm_fetcher_mixin.async_get_clientsession",
+            return_value=session,
+        ):
+            ok = await dev.async_update_from_somafm.__wrapped__(dev)
+        assert ok is True
+        dev.async_get_itunes_artwork.assert_awaited_once()
+        # iTunes art wins over the SomaFM-provided albumart
+        assert "mzstatic" in dev._media_image_url
+
+    @pytest.mark.asyncio
+    async def test_somafm_albumart_used_when_itunes_fails(self) -> None:
+        """When iTunes returns nothing, SomaFM's per-track ``albumart``
+        is the next-best art source before the station logo."""
+        dev = _make_device()
+        dev._media_title = "SomaFM: Drone Zone"
+        dev._somafm_cached_station = "SomaFM: Drone Zone"
+
+        resp = MagicMock()
+        resp.status = 200
+        resp.json = AsyncMock(return_value={
+            "songs": [{
+                "title": "Spira Mirabilis",
+                "artist": "Kodomo",
+                "album": "Patterns and Light",
+                "albumart": "https://api.somafm.com/img/somafm-track.jpg",
+            }]
+        })
+        session = MagicMock()
+        session.get = AsyncMock(return_value=resp)
+
+        # iTunes lookup fails (no match)
+        dev.async_get_itunes_artwork = AsyncMock(return_value=False)
+
+        with patch(
+            "custom_components.linkplay.somafm_fetcher_mixin.async_get_clientsession",
+            return_value=session,
+        ):
+            ok = await dev.async_update_from_somafm.__wrapped__(dev)
+        assert ok is True
+        assert dev._media_image_url == "https://api.somafm.com/img/somafm-track.jpg"
+
+    @pytest.mark.asyncio
     async def test_http_error_returns_false_silently(self) -> None:
         dev = _make_device()
         dev._media_title = "SomaFM: Lush"

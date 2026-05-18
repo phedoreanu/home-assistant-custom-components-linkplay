@@ -63,6 +63,7 @@ from .api_client_mixin import LinkPlayAPIClientMixin
 from .commands_mixin import LinkPlayCommandsMixin
 from .crossfade_mixin import LinkPlayCrossfadeMixin
 from .icecast_fetcher_mixin import LinkPlayIcecastFetcherMixin
+from .itunes_artwork_mixin import LinkPlayItunesArtworkMixin
 from .lastfm_mixin import LinkPlayLastFmMixin
 from .media_controls_mixin import LinkPlayMediaControlsMixin
 from .multiroom_mixin import LinkPlayMultiroomMixin
@@ -407,6 +408,7 @@ class LinkPlayDevice(
     LinkPlayStreamResolverMixin,
     LinkPlayIcecastFetcherMixin,
     LinkPlaySomaFmFetcherMixin,
+    LinkPlayItunesArtworkMixin,
     LinkPlayLastFmMixin,
     LinkPlayVolumeControlsMixin,
     LinkPlayCrossfadeMixin,
@@ -968,6 +970,20 @@ class LinkPlayDevice(
                 self._new_song = await self.async_is_playing_new_track()
                 if self._lastfm_api_key is not None and self._new_song:
                     await self.async_get_lastfm_coverart()
+                # iTunes Search artwork: fire on every track change, not
+                # only the SomaFM-fetcher path - non-SomaFM streams with
+                # firmware-supplied title/artist also benefit from a
+                # real album cover instead of the station logo.
+                if self._new_song:
+                    itunes = getattr(self, "async_get_itunes_artwork", None)
+                    if itunes is not None:
+                        try:
+                            await itunes()
+                        except Exception as error:
+                            _LOGGER.debug(
+                                "[%s @ %s] iTunes art lookup raised: %s",
+                                self._name, self._host, error,
+                            )
 
             self._media_prev_artist = self._media_artist
             self._media_prev_title = self._media_title

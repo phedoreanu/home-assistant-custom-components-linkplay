@@ -237,6 +237,10 @@ Channel slugs are resolved via `https://somafm.com/channels.json` (cached for th
 
 Nothing to configure — it activates automatically for any SomaFM preset played through TuneIn. The fetcher polls every 5 seconds per device, so the displayed track refreshes within ~6 seconds of pressing play **and** between songs while the channel keeps playing.
 
+Per-track artwork is resolved in priority order: **iTunes Search** (queried with `artist + title`, returns 600x600 album cover for known albums) → SomaFM's per-track `albumart` field (set on some channels) → SomaFM's channel logo. iTunes is keyless, throttled to 4 seconds per device, and cached per `(artist, title)` so each track only hits the network once. The lookup also fires for any non-SomaFM stream whenever the resolved track changes, so generic Icecast / TuneIn stations get real album art too.
+
+If you want to hide the title / artist row entirely, use the mini-media-player card's `hide: info: true` option — `icecast_metadata = Off` keeps reporting the firmware-supplied title.
+
 ## Presets
 
 Linkplay devices allow saving music presets (for example Spotify playlists) via the control app on the phone/tablet, to be recalled for later listening. Recall a preset from Home Assistant:
