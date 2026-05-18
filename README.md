@@ -156,7 +156,7 @@ _Note:_ **Don't** use HTTP**S** streams. Linkplay chipsets seem to have limited 
 | `linkplay.snapshot` | `entity_id` | `switchinput` (default `True`) | Save player state for later restore |
 | `linkplay.restore` | `entity_id` | — | Restore previously snapshotted state |
 | `linkplay.play_track` | `entity_id`, `track` | — | Play a track from a template URL |
-| `linkplay.set_group_volume` | `entity_id` (master), `volume` (0.0–1.0) | `volume_offsets` (deprecated) | Set master volume; each slave shifts by the same delta, mini-media-player style |
+| `linkplay.set_group_volume` | `entity_id` (master), `volume` (0.0–1.0) | — | Set master volume; each slave shifts by the same delta, mini-media-player style |
 
 Home Assistant standard services `media_player.join`, `media_player.unjoin`, `media_player.volume_set`, `media_player.play_media`, `media_player.select_source`, etc. are also supported. Cards like mini-media-player use these.
 
@@ -226,21 +226,7 @@ automation:
           volume: 0.2
 ```
 
-#### `volume_offsets` (deprecated)
-
-The original API took a `volume_offsets` dict of per-entity adjustments relative to a base volume. It still works for backwards compatibility — listed speakers are placed at `volume + offset` (clamped) and skip the delta-shift — but new automations should prefer the standard `media_player.volume_set` per entity if they need explicit per-speaker control.
-
-```yaml
-service: linkplay.set_group_volume
-data:
-  entity_id: media_player.living_room
-  volume: 0.5
-  volume_offsets:
-    media_player.kitchen: 10      # absolute: 0.5 + 0.10 = 0.60
-    media_player.bedroom: -15     # absolute: 0.5 - 0.15 = 0.35
-```
-
-Offsets accept integer percentages (-100 to 100) or fractional values (-1.0 to 1.0). Mixed within a call is fine. Offsets are not persisted; they apply only to that service call.
+For explicit per-speaker control, call the standard `media_player.volume_set` against each entity directly.
 
 
 ## SomaFM track metadata

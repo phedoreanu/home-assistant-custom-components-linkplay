@@ -501,9 +501,9 @@ class TestLinkplayConfigFlow:
             "DeviceName": "Test Device"
         })
 
-        mock_context = AsyncMock()
-        mock_context.__aenter__.return_value = mock_response
-        mock_context.__aexit__.return_value = None
+        mock_context = MagicMock()
+        mock_context.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_context.__aexit__ = AsyncMock(return_value=None)
 
         with patch(
             "custom_components.linkplay.config_flow.async_get_clientsession"
@@ -533,9 +533,9 @@ class TestLinkplayConfigFlow:
             "DeviceName": "HTTPS Device"
         })
 
-        mock_context = AsyncMock()
-        mock_context.__aenter__.return_value = mock_response
-        mock_context.__aexit__.return_value = None
+        mock_context = MagicMock()
+        mock_context.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_context.__aexit__ = AsyncMock(return_value=None)
 
         with patch(
             "custom_components.linkplay.config_flow.async_get_clientsession"
@@ -558,7 +558,9 @@ class TestLinkplayConfigFlow:
         with patch(
             "custom_components.linkplay.config_flow.async_get_clientsession"
         ) as mock_session:
-            mock_client = AsyncMock()
+            # session.get() is sync in aiohttp (returns _RequestContextManager).
+            # Using AsyncMock would make .get() return a never-awaited coroutine.
+            mock_client = MagicMock()
             mock_client.get.side_effect = TimeoutError()
             mock_session.return_value = mock_client
 
@@ -577,9 +579,13 @@ class TestLinkplayConfigFlow:
         ) as mock_session:
             import aiohttp
 
-            mock_client = AsyncMock()
-            mock_client.get.side_effect = aiohttp.ClientConnectorError(
-                connection_key=None, os_error=OSError("Connection refused")
+            mock_client = MagicMock()
+            # ClientConnectorError requires a ConnectionKey with a
+            # populated ``ssl`` attribute, which differs across aiohttp
+            # versions. ClientError is its parent class and is what
+            # _validate_device's except clause matches on.
+            mock_client.get.side_effect = aiohttp.ClientError(
+                "Connection refused"
             )
             mock_session.return_value = mock_client
 
@@ -616,9 +622,9 @@ class TestLinkplayConfigFlow:
         mock_response = MagicMock()
         mock_response.status = 400
 
-        mock_context = AsyncMock()
-        mock_context.__aenter__.return_value = mock_response
-        mock_context.__aexit__.return_value = None
+        mock_context = MagicMock()
+        mock_context.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_context.__aexit__ = AsyncMock(return_value=None)
 
         with patch(
             "custom_components.linkplay.config_flow.async_get_clientsession"
@@ -639,16 +645,18 @@ class TestLinkplayConfigFlow:
         flow = LinkplayConfigFlow()
         flow.hass = hass
 
-        mock_response = AsyncMock()
+        mock_response = MagicMock()
         mock_response.status = 500
-        mock_response.__aenter__.return_value = mock_response
-        mock_response.__aexit__.return_value = None
+
+        mock_context = MagicMock()
+        mock_context.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_context.__aexit__ = AsyncMock(return_value=None)
 
         with patch(
             "custom_components.linkplay.config_flow.async_get_clientsession"
         ) as mock_session:
-            mock_client = AsyncMock()
-            mock_client.get.return_value = mock_response
+            mock_client = MagicMock()
+            mock_client.get.return_value = mock_context
             mock_session.return_value = mock_client
 
             result = await flow._validate_device("192.168.1.100", "http")

@@ -198,6 +198,171 @@ class TestUnjoinWaitWindow:
         dev.async_select_source.assert_awaited_once_with("Line-in")
 
 
+def _idle_payload():
+    return {
+        "type": "0", "mode": "0", "status": "stop",
+        "vol": "30", "mute": "0", "eq": "0", "loop": "4",
+        "totlen": "0", "curpos": "0", "uri": "",
+        "Title": "", "Artist": "", "Album": "",
+    }
+
+
+def _stream_payload(**overrides):
+    base = {
+        "type": "0", "mode": "10", "status": "play",
+        "vol": "55", "mute": "0", "eq": "2", "loop": "0",
+        "totlen": "0", "curpos": "0",
+        # hex("http://stream/mp3")
+        "uri": "687474703a2f2f73747265616d2f6d7033",
+        "Title": "Stream Title", "Artist": "", "Album": "",
+    }
+    base.update(overrides)
+    return base
+
+
+def _localfile_payload():
+    return {
+        "type": "0", "mode": "11", "status": "play",
+        "vol": "50", "mute": "0", "eq": "1", "loop": "2",
+        "totlen": "180000", "curpos": "30000", "uri": "",
+        "Title": "", "Artist": "", "Album": "",
+    }
+
+
+def _spotify_payload():
+    return {
+        "type": "0", "mode": "31", "status": "play",
+        "vol": "70", "mute": "0", "eq": "0", "loop": "0",
+        "totlen": "240000", "curpos": "12000", "uri": "",
+        "Title": "", "Artist": "", "Album": "",
+    }
+
+
+def _device_status_payload(**overrides):
+    base = {
+        "WifiChannel": "6", "ssid": "my-net", "uuid": "DEVICE-UUID",
+        "DeviceName": "Renamed", "firmware": "4.6.328",
+        "mcu_ver": "1.2", "preset_key": "10",
+    }
+    base.update(overrides)
+    return base
+
+
+class TestPlayerStatusBranches:
+    """End-to-end ``async_update`` with seeded ``_player_statdata`` payloads."""
+
+    def _prep(self, dev, payload):
+        async def _stub(*a, **kw):
+            dev._player_statdata = payload
+        dev.async_get_status = AsyncMock(side_effect=_stub)
+        dev.async_update_from_somafm = AsyncMock(return_value=False)
+        dev.async_get_playerstatus_metadata = AsyncMock(return_value=True)
+        dev.async_update_via_upnp = AsyncMock()
+        dev.async_get_icecast_meta = AsyncMock(return_value=False)
+        dev.async_update_lastfm = AsyncMock(return_value=False)
+        dev.async_get_local_mediasource_metadata_from_path = AsyncMock(
+            return_value=False
+        )
+        dev.async_is_playing_new_track = AsyncMock(return_value=False)
+        dev._factory = MagicMock()
+        dev._factory.async_create_device = AsyncMock(return_value=MagicMock())
+        dev.call_linkplay_httpapi = AsyncMock(return_value="OK")
+
+    @pytest.mark.asyncio
+    async def test_idle_payload_sets_state_idle(self, monkeypatch) -> None:
+        from homeassistant.util.dt import utcnow
+
+        dev = _make_device("dev")
+        monkeypatch.setattr(
+            "custom_components.linkplay.media_player.AUTOIDLE_STATE_TIMEOUT",
+            timedelta(seconds=0),
+        )
+        dev._first_update = False
+        dev._idletime_updated_at = utcnow() - timedelta(minutes=1)
+        self._prep(dev, _idle_payload())
+        await dev.async_update()
+        assert dev._state == "idle"
+        assert dev._volume == "30"
+
+    @pytest.mark.asyncio
+    async def test_playing_stream_payload(self) -> None:
+        dev = _make_device("dev")
+        dev._first_update = False
+        self._prep(dev, _stream_payload())
+        await dev.async_update()
+        assert dev._state == "playing"
+        assert dev._playing_stream is True
+        assert dev._media_uri_final.startswith("http://stream/")
+
+    @pytest.mark.asyncio
+    async def test_localfile_paused_payload(self) -> None:
+        dev = _make_device("dev")
+        dev._first_update = False
+        payload = _localfile_payload()
+        payload["status"] = "pause"
+        self._prep(dev, payload)
+        await dev.async_update()
+        assert dev._state == "paused"
+        assert dev._duration == 180
+        assert dev._playhead_position == 30
+
+    @pytest.mark.asyncio
+    async def test_spotify_payload_marks_playing_spotify(self) -> None:
+        dev = _make_device("dev")
+        dev._first_update = False
+        self._prep(dev, _spotify_payload())
+        await dev.async_update()
+        assert dev._playing_spotify is True
+        assert dev._state == "playing"
+
+    @pytest.mark.asyncio
+    async def test_first_update_populates_device_info(self) -> None:
+        dev = _make_device("dev")
+        device_status = _device_status_payload()
+
+        async def _httpapi(cmd, *a, **kw):
+            if "getStatus" in cmd:
+                return device_status
+            return "OK"
+
+        self._prep(dev, _idle_payload())
+        dev.call_linkplay_httpapi = AsyncMock(side_effect=_httpapi)
+        await dev.async_update()
+        assert dev._uuid == "DEVICE-UUID"
+        assert dev._fw_ver == "4.6.328"
+        assert dev._preset_key == 10
+        assert dev._first_update is False
+
+    @pytest.mark.asyncio
+    async def test_first_update_with_missing_preset_key_defaults_to_4(
+        self,
+    ) -> None:
+        dev = _make_device("dev")
+        ds = _device_status_payload()
+        ds.pop("preset_key")
+
+        async def _httpapi(cmd, *a, **kw):
+            if "getStatus" in cmd:
+                return ds
+            return "OK"
+
+        self._prep(dev, _idle_payload())
+        dev.call_linkplay_httpapi = AsyncMock(side_effect=_httpapi)
+        await dev.async_update()
+        assert dev._preset_key == 4
+
+    @pytest.mark.asyncio
+    async def test_no_status_returns_true_without_state_change(self) -> None:
+        dev = _make_device("dev")
+
+        async def _stub(*a, **kw):
+            dev._player_statdata = None
+
+        dev.async_get_status = AsyncMock(side_effect=_stub)
+        result = await dev.async_update()
+        assert result is True
+
+
 class TestProtocolAutoDetectFailure:
     """If _protocol is None and both https and http probes fail, async_update
     must return False without raising."""

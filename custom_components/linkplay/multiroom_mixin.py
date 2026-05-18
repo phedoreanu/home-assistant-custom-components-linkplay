@@ -16,7 +16,6 @@ LinkPlayDevice, which provides:
 from __future__ import annotations
 
 import logging
-import warnings
 
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.util.dt import utcnow
@@ -272,7 +271,7 @@ class LinkPlayMultiroomMixin:
         else:
             _LOGGER.warning("Failed to unjoin_me from multiroom. Device: %s, Got response: %s", self.entity_id, value)
 
-    async def async_set_group_volume(self, volume: float, volume_offsets: dict[str, float] | None = None):
+    async def async_set_group_volume(self, volume: float):
         """Set the master volume and shift every slave by the same delta.
 
         Mirrors mini-media-player's group-volume behaviour: each slave
@@ -284,28 +283,7 @@ class LinkPlayMultiroomMixin:
 
         Args:
             volume: new master volume (0.0 to 1.0).
-            volume_offsets: deprecated. When supplied, each entry is
-                added to ``volume`` and applied as an absolute target
-                for that member, overriding the delta-shift for that
-                speaker only. Retained for backwards compatibility with
-                existing automations - new callers should drop it and
-                use HA's per-entity ``media_player.volume_set`` if they
-                want explicit per-speaker control.
         """
-        volume_offsets = volume_offsets or {}
-
-        if volume_offsets and not getattr(self, "_offsets_deprecation_warned", False):
-            warnings.warn(
-                "linkplay.set_group_volume volume_offsets is deprecated; "
-                "use media_player.volume_set per entity for explicit "
-                "per-speaker control.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            # Per-entity flag so noisy automations don't spam the log,
-            # but each device still emits the warning once.
-            self._offsets_deprecation_warned = True
-
         # First call after restart has no prior master volume to diff
         # against. Treat the call as an absolute set (delta=0) so every
         # member lands on `volume` instead of drifting from stale state.
@@ -313,8 +291,8 @@ class LinkPlayMultiroomMixin:
         delta = volume - current_master
 
         _LOGGER.debug(
-            "Group volume: master=%s, %.2f -> %.2f (delta=%+.2f), overrides=%s, group=%s",
-            self.entity_id, current_master, volume, delta, volume_offsets,
+            "Group volume: master=%s, %.2f -> %.2f (delta=%+.2f), group=%s",
+            self.entity_id, current_master, volume, delta,
             self._multiroom_group,
         )
 
@@ -322,13 +300,8 @@ class LinkPlayMultiroomMixin:
         group_entities = [by_eid[eid] for eid in self._multiroom_group if eid in by_eid]
 
         for device in group_entities:
-            # Master is always pinned to `volume`; the offsets dict is
-            # checked second so a stray master-entry doesn't double-shift
-            # the master's own slider.
             if device.entity_id == self.entity_id:
                 target = volume
-            elif device.entity_id in volume_offsets:
-                target = volume + volume_offsets[device.entity_id]
             else:
                 base = device.volume_level if device.volume_level is not None else current_master
                 target = base + delta

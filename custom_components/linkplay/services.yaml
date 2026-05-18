@@ -174,15 +174,4 @@ set_group_volume:
           max: 1
           step: 0.01
           mode: slider
-    volume_offsets:
-      name: Volume Overrides (deprecated)
-      description: >-
-        Deprecated. Optional dict ``{entity_id: offset}`` (percentages -100..100
-        or fractions -1.0..1.0). When set, those members ignore the delta-shift
-        and are placed at ``volume + offset`` (clamped). Prefer
-        ``media_player.volume_set`` per entity for explicit control.
-      example: '{"media_player.kitchen": -10, "media_player.living_room": 20}'
-      required: false
-      selector:
-        object:
 
