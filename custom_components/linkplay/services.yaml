@@ -151,13 +151,15 @@ play_track:
 set_group_volume:
   name: Set Group Volume
   description: >-
-    Set the master volume and shift every slave by the same delta, the way
-    mini-media-player's group slider works. Each slave keeps its current
-    offset relative to the master and is clamped to [0.0, 1.0].
+    Set the master volume and apply each slave's configured volume_offset.
+    Mirrors mini-media-player's per-entity offset behaviour: master goes to
+    ``volume``, each slave goes to ``volume + slave_volume_offset/100``,
+    clamped to [0.0, 1.0]. Configure each slave's offset via the integration
+    options flow (Configure button on the integration card).
   fields:
     entity_id:
       name: Master Entity ID
-      description: Master speaker of the multiroom group. The new volume is applied here; slaves shift by the same delta.
+      description: Master speaker of the multiroom group.
       example: media_player.sound_room1
       required: true
       selector:
@@ -165,7 +167,7 @@ set_group_volume:
           integration: linkplay
     volume:
       name: Master Volume
-      description: New volume for the master (0.0 to 1.0). Each slave moves by the same delta from its current volume.
+      description: New master volume (0.0 to 1.0). Slaves shift by their configured offset.
       example: 0.5
       required: true
       selector:

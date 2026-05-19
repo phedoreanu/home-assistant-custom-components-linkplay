@@ -35,7 +35,7 @@ def _make_device():
     dev.async_parse_pls_url = AsyncMock(side_effect=lambda u: u)
     dev.async_tracklist_via_upnp = AsyncMock()
     dev._fw_ver = "4.2"
-    dev._volume = 0  # crossfade short-circuits
+    dev._volume = 0
     return dev
 
 

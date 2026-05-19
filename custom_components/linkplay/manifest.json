@@ -22,7 +22,7 @@
     {"manufacturer": "LinkPlay"},
     {"deviceType": "urn:schemas-upnp-org:device:MediaRenderer:1", "manufacturer": "Linkplay Technology Inc."}
   ],
-  "version": "4.5.4",
+  "version": "4.5.14",
   "zeroconf": [
     {"type": "_linkplay._tcp.local."}
   ]

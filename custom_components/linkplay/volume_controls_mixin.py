@@ -28,16 +28,24 @@ class LinkPlayVolumeControlsMixin:
     async def _set_volume_on_device(self, volume: int, *, action: str) -> None:
         """Send a volume command to whichever device should receive it.
 
-        Picks between ``slave_vol`` / ``vol`` / Wi-Fi-direct
-        ``SlaveVolume`` based on the master/slave/Wi-Fi-direct state.
+        Uses ``vol:N`` for the device's own hardware volume, or the
+        Wi-Fi-direct ``multiroom:SlaveVolume:<ip>:<N>`` form when the
+        device is a slave on a Wi-Fi-direct group (the slave can't be
+        reached directly, so the master proxies the command).
+
+        ``setPlayerCmd:slave_vol:N`` is deliberately NOT used here. It
+        broadcasts to slaves only and leaves the master's own hardware
+        volume untouched, so calling it on a master left the master at
+        its old level while every slave moved. Group-wide volume changes
+        happen through ``async_set_group_volume``, which iterates each
+        member and calls this helper per device, so the per-device
+        ``vol:N`` is sufficient.
+
         Logs a warning on a non-OK response.
         """
         volume_s = str(volume)
         if not (self._slave_mode and self._multiroom_wifidirect):
-            if self._is_master:
-                cmd = f"setPlayerCmd:slave_vol:{volume_s}"
-            else:
-                cmd = f"setPlayerCmd:vol:{volume_s}"
+            cmd = f"setPlayerCmd:vol:{volume_s}"
             value = await self.call_linkplay_httpapi(cmd, None)
         else:
             if self._snapshot_active:

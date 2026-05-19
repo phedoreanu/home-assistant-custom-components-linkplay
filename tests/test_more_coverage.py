@@ -31,6 +31,9 @@ def _make_device():
     dev.hass = hass
     dev.async_write_ha_state = MagicMock()
     dev.call_linkplay_httpapi = AsyncMock(return_value="OK")
+    # Skip the post-join slave-IP poll wait; these tests don't exercise it.
+    dev._slave_ip_poll_interval = 0
+    dev._slave_ip_poll_max = 0
     return dev
 
 
@@ -61,7 +64,7 @@ class TestMediaSourceResolution:
     async def test_local_media_source_url_resolved(self) -> None:
         dev = _make_device()
         dev._fw_ver = "4.2"
-        dev._volume = 0  # crossfade short-circuits
+        dev._volume = 0
         dev.async_detect_stream_url_redirection = AsyncMock(side_effect=lambda u: u)
 
         # Fake play item from media_source.async_resolve_media

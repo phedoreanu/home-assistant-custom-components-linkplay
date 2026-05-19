@@ -35,9 +35,10 @@ class MockLinkplayDevice:
         self._slave_mode = False
         self._multiroom_group: list[str] = []
         self.volume_level: float | None = None
+        self._volume_offset = 0  # default: slave tracks master target
         # Make async_set_volume_level update volume_level too so tests
-        # that issue multiple group-volume calls see the delta-shift
-        # against the value left behind by the previous call.
+        # that issue multiple group-volume calls see the result of the
+        # previous call reflected on the next iteration.
         async def _set(level: float) -> None:
             self.volume_level = level
         self.async_set_volume_level = AsyncMock(side_effect=_set)
@@ -139,19 +140,23 @@ class TestSetGroupVolumeService:
         kitchen.async_set_volume_level.assert_called_once_with(0.6)
 
     @pytest.mark.asyncio
-    async def test_delta_shift_preserves_slave_offsets(
+    async def test_per_slave_offsets_anchored_to_master_target(
         self, hass: HomeAssistant
     ) -> None:
-        """Master moves +0.20; each slave shifts by the same +0.20 from its
-        own current volume, preserving the offset captured at group time."""
-        master, (kitchen, bedroom) = _make_group(
+        """v4.5.13: each slave's target is ``master_target + offset/100``
+        with offset in signed percentage points. Mirrors mini-media-player's
+        per-entity ``volume_offset`` semantics."""
+        master, (kitchen, office) = _make_group(
             hass,
             "media_player.living_room",
-            ["media_player.kitchen", "media_player.bedroom"],
+            ["media_player.kitchen", "media_player.office"],
         )
-        master.volume_level = 0.40
-        kitchen.volume_level = 0.30  # -0.10 offset
-        bedroom.volume_level = 0.60  # +0.20 offset
+        # Master's current volume is irrelevant - the new behaviour
+        # anchors every slave to the new master target plus the
+        # configured per-slave offset.
+        master.volume_level = 1.0  # post-Bluetooth, irrelevant
+        kitchen._volume_offset = -10
+        office._volume_offset = -15
         await async_setup_services(hass)
 
         await hass.services.async_call(
@@ -159,28 +164,50 @@ class TestSetGroupVolumeService:
             SERVICE_SET_GROUP_VOLUME,
             {
                 ATTR_ENTITY_ID: "media_player.living_room",
-                ATTR_VOLUME: 0.60,
+                ATTR_VOLUME: 0.18,
             },
             blocking=True,
         )
 
-        master.async_set_volume_level.assert_called_once_with(0.60)
+        master.async_set_volume_level.assert_called_once_with(0.18)
         kitchen.async_set_volume_level.assert_called_once_with(
-            pytest.approx(0.50)
+            pytest.approx(0.08)
         )
-        bedroom.async_set_volume_level.assert_called_once_with(
-            pytest.approx(0.80)
+        office.async_set_volume_level.assert_called_once_with(
+            pytest.approx(0.03)
         )
 
     @pytest.mark.asyncio
-    async def test_delta_shift_clamps_slave_at_upper_bound(
+    async def test_zero_offset_keeps_slave_on_master_target(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Slave with default offset 0 ends at the same value as master."""
+        master, (kitchen,) = _make_group(
+            hass, "media_player.living_room", ["media_player.kitchen"]
+        )
+        await async_setup_services(hass)
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_GROUP_VOLUME,
+            {
+                ATTR_ENTITY_ID: "media_player.living_room",
+                ATTR_VOLUME: 0.42,
+            },
+            blocking=True,
+        )
+
+        master.async_set_volume_level.assert_called_once_with(0.42)
+        kitchen.async_set_volume_level.assert_called_once_with(0.42)
+
+    @pytest.mark.asyncio
+    async def test_positive_offset_above_master_clamps_at_one(
         self, hass: HomeAssistant
     ) -> None:
         master, (kitchen,) = _make_group(
             hass, "media_player.living_room", ["media_player.kitchen"]
         )
-        master.volume_level = 0.50
-        kitchen.volume_level = 0.90
+        kitchen._volume_offset = 50
         await async_setup_services(hass)
 
         await hass.services.async_call(
@@ -188,7 +215,7 @@ class TestSetGroupVolumeService:
             SERVICE_SET_GROUP_VOLUME,
             {
                 ATTR_ENTITY_ID: "media_player.living_room",
-                ATTR_VOLUME: 0.90,  # +0.40 delta -> kitchen would be 1.30
+                ATTR_VOLUME: 0.90,  # 0.90 + 0.50 -> would be 1.40
             },
             blocking=True,
         )
@@ -197,14 +224,20 @@ class TestSetGroupVolumeService:
         kitchen.async_set_volume_level.assert_called_once_with(1.0)
 
     @pytest.mark.asyncio
-    async def test_delta_shift_clamps_slave_at_lower_bound(
+    async def test_master_always_set_even_with_empty_group(
         self, hass: HomeAssistant
     ) -> None:
-        master, (kitchen,) = _make_group(
-            hass, "media_player.living_room", ["media_player.kitchen"]
+        """v4.5.9 defensive guard: the master is always reached by
+        ``async_set_group_volume`` even if ``_multiroom_group`` is empty
+        (e.g. the master-side poll briefly cleared the list during a
+        WiFi-direct join propagation race that outlived the join-grace
+        window).
+        """
+        master, _ = _make_group(
+            hass, "media_player.living_room", []
         )
-        master.volume_level = 0.50
-        kitchen.volume_level = 0.10
+        master._multiroom_group = []  # poll-cleared
+        master.volume_level = 0.40
         await async_setup_services(hass)
 
         await hass.services.async_call(
@@ -212,7 +245,29 @@ class TestSetGroupVolumeService:
             SERVICE_SET_GROUP_VOLUME,
             {
                 ATTR_ENTITY_ID: "media_player.living_room",
-                ATTR_VOLUME: 0.20,  # -0.30 delta -> kitchen would be -0.20
+                ATTR_VOLUME: 0.18,
+            },
+            blocking=True,
+        )
+
+        master.async_set_volume_level.assert_called_once_with(0.18)
+
+    @pytest.mark.asyncio
+    async def test_negative_offset_below_master_clamps_at_zero(
+        self, hass: HomeAssistant
+    ) -> None:
+        master, (kitchen,) = _make_group(
+            hass, "media_player.living_room", ["media_player.kitchen"]
+        )
+        kitchen._volume_offset = -50
+        await async_setup_services(hass)
+
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_GROUP_VOLUME,
+            {
+                ATTR_ENTITY_ID: "media_player.living_room",
+                ATTR_VOLUME: 0.20,  # 0.20 + (-0.50) -> would be -0.30
             },
             blocking=True,
         )

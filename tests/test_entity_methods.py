@@ -39,11 +39,72 @@ class TestPresetButton:
     async def test_valid_preset_sends_mcu_short_click(self) -> None:
         dev = _make_device()
         dev._preset_key = 4
+        dev._volume = 0  # skip the v4.5.14 vol re-apply after preset
         await dev.async_preset_button(2)
-        # Wrapped by crossfade; volume==0 means it short-circuits and
-        # just runs the impl directly.
         cmds = [c.args[0] for c in dev.call_linkplay_httpapi.await_args_list]
         assert "MCUKeyShortClick:2" in cmds
+
+    @pytest.mark.asyncio
+    async def test_preset_reapplies_master_volume_after_switch(self) -> None:
+        """v4.5.14: AudioPro firmware restores the per-source saved
+        volume on a preset switch. Re-apply the master's tracked volume
+        so the firmware HW + HA cache match what the user asked for."""
+        from unittest.mock import patch
+
+        dev = _make_device()
+        dev._preset_key = 4
+        dev._volume = 18  # what set_group_volume just set
+        with patch("custom_components.linkplay.media_player.asyncio.sleep"):
+            await dev.async_preset_button(2)
+        cmds = [c.args[0] for c in dev.call_linkplay_httpapi.await_args_list]
+        # MCUKeyShortClick + vol:18 re-apply both present, in that order
+        assert cmds.index("MCUKeyShortClick:2") < cmds.index(
+            "setPlayerCmd:vol:18"
+        )
+
+    @pytest.mark.asyncio
+    async def test_preset_master_reapplies_slave_volumes_with_offsets(
+        self,
+    ) -> None:
+        """Group case: after MCUKeyShortClick the master re-sends its
+        tracked volume to itself AND multiroom:SlaveVolume to each
+        slave at ``master_target + offset``."""
+        from custom_components.linkplay import LinkPlayData
+        from unittest.mock import patch
+
+        master = _make_device()
+        master.entity_id = "media_player.master"
+        master._preset_key = 4
+        master._volume = 18
+        master._is_master = True
+        master._multiroom_group = ["media_player.master", "media_player.kitchen"]
+
+        kitchen = _make_device()
+        kitchen.entity_id = "media_player.kitchen"
+        kitchen._slave_mode = True
+        kitchen._multiroom_wifidirect = False
+        kitchen._slave_ip = "10.10.10.93"
+        kitchen._volume_offset = -10
+        kitchen.call_linkplay_httpapi = AsyncMock(return_value="OK")
+
+        data = LinkPlayData()
+        data.entities = [master, kitchen]
+        master.hass.data["linkplay"] = data
+        kitchen.hass = master.hass
+
+        with patch("custom_components.linkplay.media_player.asyncio.sleep"):
+            await master.async_preset_button(1)
+
+        master_cmds = [
+            c.args[0] for c in master.call_linkplay_httpapi.await_args_list
+        ]
+        kitchen_cmds = [
+            c.args[0] for c in kitchen.call_linkplay_httpapi.await_args_list
+        ]
+        assert "MCUKeyShortClick:1" in master_cmds
+        assert "setPlayerCmd:vol:18" in master_cmds
+        # kitchen target 18 + (-10) = 8 -> vol:8 on kitchen directly
+        assert "setPlayerCmd:vol:8" in kitchen_cmds
 
     @pytest.mark.asyncio
     async def test_preset_out_of_range_warns_no_call(self) -> None:

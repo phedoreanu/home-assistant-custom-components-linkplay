@@ -232,7 +232,6 @@ class TestAsyncSetupEntry:
             "multiroom_wifidirect": True,
             "led_off": True,
             "volume_step": 10,
-            "crossfade_ms": 500,
         }
         entry.unique_id = "OLD-UUID"
         add_entities = MagicMock()
@@ -246,7 +245,6 @@ class TestAsyncSetupEntry:
         entity = add_entities.call_args.args[0][0]
         assert entity._volume_step == 10
         assert entity._multiroom_wifidirect is True
-        assert entity._crossfade_ms == 500
         # entry unique_id preserved when set
         assert entity._uuid == "OLD-UUID"
         # response's DeviceName overrides entry name

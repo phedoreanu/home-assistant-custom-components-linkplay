@@ -15,7 +15,9 @@ LinkPlayDevice, which provides:
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from datetime import timedelta
 
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.util.dt import utcnow
@@ -24,9 +26,26 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
+# Window during which we trust the locally-built ``_multiroom_group``
+# over a poll response that says ``slaves=0``. On AudioPro A28 firmware
+# (and others) the ``multiroom:getSlaveList`` response lags the
+# ``ConnectMasterAp`` success by several seconds; without this grace
+# the master's group is cleared between ``async_join`` and the very
+# next user-script action (e.g. ``linkplay.set_group_volume``), and
+# the service iterates an empty list.
+_JOIN_GRACE = timedelta(seconds=10)
+
+
 
 class LinkPlayMultiroomMixin:
     """Multiroom half of LinkPlayDevice."""
+
+    # How long ``async_join`` waits for the firmware to populate each
+    # new slave's WiFi-direct IP (visible via ``multiroom:getSlaveList``)
+    # before returning. Class attributes so tests can override them on
+    # the instance without monkeypatching the module.
+    _slave_ip_poll_interval = 0.5  # seconds between getSlaveList polls
+    _slave_ip_poll_max = 10        # attempts -> up to ~5 s total
 
     # ---- properties ----
 
@@ -84,6 +103,21 @@ class LinkPlayMultiroomMixin:
 
     # ---- master-side polling ----
 
+    def _within_join_grace(self) -> bool:
+        """True while ``async_join`` is still propagating to firmware.
+
+        WiFi-direct slaves take several seconds to appear in
+        ``multiroom:getSlaveList`` after ``ConnectMasterAp`` returns OK.
+        During that window we keep the locally-built ``_multiroom_group``
+        even if the firmware claims zero slaves, so user scripts that
+        run ``linkplay.join`` immediately followed by
+        ``linkplay.set_group_volume`` see a populated group.
+        """
+        return (
+            self._multiroom_joinat is not None
+            and (utcnow() - self._multiroom_joinat) < _JOIN_GRACE
+        )
+
     async def _async_poll_multiroom_master_status(self):
         """Fetch the master multiroom slave list and propagate state to slaves.
 
@@ -96,18 +130,22 @@ class LinkPlayMultiroomMixin:
 
         slave_list = await self.call_linkplay_httpapi("multiroom:getSlaveList", True)
         if slave_list is None:
-            self._is_master = False
-            self._slave_list = None
-            self._multiroom_group = []
+            if not self._within_join_grace():
+                self._is_master = False
+                self._slave_list = None
+                self._multiroom_group = []
             return True
 
-        self._slave_list = []
-        self._multiroom_group = []
-        self._is_master = False
         if isinstance(slave_list, dict):
             if int(slave_list['slaves']) > 0:
-                self._multiroom_group.append(self.entity_id)
+                # Firmware confirms group; rebuild from the authoritative
+                # slave list (and clear the grace timestamp, since the
+                # group is now reflected in firmware).
+                self._multiroom_joinat = None
+                self._slave_list = []
+                self._multiroom_group = []
                 self._is_master = True
+                self._multiroom_group.append(self.entity_id)
                 for slave in slave_list['slave_list']:
                     for device in self.hass.data[DOMAIN].entities:
                         if device._name == slave['name']:
@@ -136,6 +174,17 @@ class LinkPlayMultiroomMixin:
                         if device.entity_id in self._multiroom_group:
                             await device.async_set_multiroom_group(self._multiroom_group)
 
+            elif not self._within_join_grace():
+                # Firmware says no slaves and we're outside the
+                # post-join grace window, so the player really is
+                # standalone again. Clear the group.
+                self._slave_list = []
+                self._multiroom_group = []
+                self._is_master = False
+            # else: still in grace, leave _multiroom_group / _is_master
+            # alone so the locally-built post-join state survives the
+            # firmware's transient zero-slaves report.
+
         else:
             _LOGGER.debug("Erroneous JSON during slave list parsing and processing: %s, %s", self.entity_id, self._name)
 
@@ -143,10 +192,15 @@ class LinkPlayMultiroomMixin:
 
     # ---- join / unjoin ----
 
-    async def async_join_players(self, slaves):
-        """Join `group_members` as a player group (standard HA service)."""
+    async def async_join_players(self, group_members):
+        """Join ``group_members`` as a player group (standard HA service).
+
+        Home Assistant's media_player.join service calls this with the
+        keyword name ``group_members``; the parameter is a list of
+        entity_ids to add as slaves to this device.
+        """
         entities = self.hass.data[DOMAIN].entities
-        entities = [e for e in entities if e.entity_id in slaves]
+        entities = [e for e in entities if e.entity_id in group_members]
         await self.async_join(entities)
 
     async def async_join(self, slaves):
@@ -187,7 +241,13 @@ class LinkPlayMultiroomMixin:
                     await slave.async_set_media_title(self._media_title)
                     await slave.async_set_media_artist(self._media_artist)
                     await slave.async_set_state(self.state)
-                    await slave.async_set_slave_ip(self._host)
+                    # Leave _slave_ip as-is until the firmware reveals
+                    # the WiFi-direct address via multiroom:getSlaveList.
+                    # The previous code wrote self._host here, which made
+                    # multiroom:SlaveVolume:<master-ip>:<N> commands
+                    # silently no-op (wrong target). The retry-poll loop
+                    # at the end of async_join populates the real IP
+                    # before returning.
                     await slave.async_set_media_image_url(self._media_image_url)
                     await slave.async_set_playhead_position(self.media_position)
                     await slave.async_set_duration(self.media_duration)
@@ -204,8 +264,78 @@ class LinkPlayMultiroomMixin:
                 await slave.async_set_multiroom_group(self._multiroom_group)
                 slave.async_write_ha_state()
 
+        # Mark the moment the group was built locally. The master-side
+        # poll uses this to ignore a transient ``slaves=0`` response
+        # from ``multiroom:getSlaveList`` for the next few seconds,
+        # which would otherwise wipe the group we just constructed.
+        if len(self._multiroom_group) > 1:
+            self._multiroom_joinat = utcnow()
+
         self._position_updated_at = utcnow()
         self.async_write_ha_state()
+
+        # Block until the firmware has reflected the new slaves in its
+        # multiroom:getSlaveList. The response carries each slave's
+        # WiFi-direct IP, which multiroom:SlaveVolume needs to address
+        # the slave instead of the master. Without this wait, a script
+        # that does ``linkplay.join`` immediately followed by
+        # ``linkplay.set_group_volume`` would send SlaveVolume commands
+        # to the master's own host and silently fail.
+        await self._await_slave_ips(slaves)
+
+    async def _await_slave_ips(self, slaves) -> None:
+        """Poll the master for each new slave's WiFi-direct IP + volume.
+
+        Returns once every joined slave has a non-master ``_slave_ip``
+        or after ``_slave_ip_poll_max`` attempts. Safe to call with an
+        empty join (returns immediately).
+
+        Also copies each slave's reported ``volume`` (0-100) into its
+        local ``_volume`` so callers like ``async_set_group_volume``
+        have an accurate base for the delta-preserving group shift.
+        Without this, slaves keep the pre-join cached value and the
+        delta shift lands them at the wrong target.
+        """
+        new_slaves = [
+            s for s in slaves if s.entity_id in self._multiroom_group
+        ]
+        if not new_slaves:
+            return
+
+        for _ in range(self._slave_ip_poll_max):
+            await asyncio.sleep(self._slave_ip_poll_interval)
+            slave_list = await self.call_linkplay_httpapi(
+                "multiroom:getSlaveList", True,
+            )
+            if not isinstance(slave_list, dict):
+                continue
+            if int(slave_list.get('slaves', 0)) <= 0:
+                continue
+            by_name = {
+                entry.get('name'): entry
+                for entry in slave_list.get('slave_list', [])
+                if entry.get('name')
+            }
+            for slave in new_slaves:
+                entry = by_name.get(slave._name)
+                if not entry:
+                    continue
+                if entry.get('ip'):
+                    await slave.async_set_slave_ip(entry['ip'])
+                if entry.get('volume') is not None:
+                    await slave.async_set_volume(entry['volume'])
+            if all(
+                getattr(s, '_slave_ip', None)
+                and s._slave_ip != self._host
+                for s in new_slaves
+            ):
+                return
+        _LOGGER.debug(
+            "async_join: timed out waiting for slave IPs from firmware "
+            "(master=%s, slaves=%s)",
+            self.entity_id,
+            [s.entity_id for s in new_slaves],
+        )
 
     async def async_unjoin_all(self):
         """Master disconnects everybody in the group."""
@@ -216,6 +346,7 @@ class LinkPlayMultiroomMixin:
         value = await self.call_linkplay_httpapi(cmd, None)
         if value == "OK":
             self._is_master = False
+            self._multiroom_joinat = None
             for slave_id in self._multiroom_group:
                 for device in self.hass.data[DOMAIN].entities:
                     if device.entity_id == slave_id and device.entity_id != self.entity_id:
@@ -262,6 +393,7 @@ class LinkPlayMultiroomMixin:
                 self._master._wait_for_mcu = 1
                 self._master.async_write_ha_state()
             self._multiroom_unjoinat = utcnow()
+            self._multiroom_joinat = None
             self._master = None
             self._is_master = False
             self._slave_mode = False
@@ -272,43 +404,72 @@ class LinkPlayMultiroomMixin:
             _LOGGER.warning("Failed to unjoin_me from multiroom. Device: %s, Got response: %s", self.entity_id, value)
 
     async def async_set_group_volume(self, volume: float):
-        """Set the master volume and shift every slave by the same delta.
+        """Set the master volume and apply each slave's configured offset.
 
-        Mirrors mini-media-player's group-volume behaviour: each slave
-        preserves its current offset relative to the master. Move the
-        master from 0.40 to 0.50 and every slave goes up by 0.10,
-        clamped to [0.0, 1.0]. A slave that's already at 1.0 stays at
-        1.0 (its offset shrinks); when the master comes back down the
-        slave drops normally from there.
+        Mirrors mini-media-player's per-entity ``volume_offset``
+        behaviour: every member's target is anchored to the new master
+        volume, and each slave shifts that target by its own configured
+        offset (signed percentage points stored in ``_volume_offset``).
+
+        Example with offsets ``kitchen=-10``, ``office=-15`` and
+        ``volume=0.18``:
+
+        * master -> 0.18
+        * kitchen -> 0.18 + (-10/100) = 0.08
+        * office -> 0.18 + (-15/100) = 0.03
+
+        All final values are clamped to ``[0.0, 1.0]``.
+
+        Earlier versions derived the delta from the master's *current*
+        volume, which depended on every slave's cached ``volume_level``
+        being accurate at call time. That broke after Bluetooth /
+        standalone sessions where the master had been driven loud
+        independently of the group: a subsequent
+        ``linkplay.set_group_volume 0.18`` would compute a large
+        negative delta and clamp slaves to silence even when the
+        intent was simply "set the group to 0.18 with per-slave
+        offsets".
 
         Args:
-            volume: new master volume (0.0 to 1.0).
+            volume: new master volume (0.0 to 1.0). Each slave ends at
+                ``volume + slave._volume_offset / 100``, clamped.
         """
-        # First call after restart has no prior master volume to diff
-        # against. Treat the call as an absolute set (delta=0) so every
-        # member lands on `volume` instead of drifting from stale state.
-        current_master = self.volume_level if self.volume_level is not None else volume
-        delta = volume - current_master
+        master_target = max(0.0, min(1.0, volume))
 
         _LOGGER.debug(
-            "Group volume: master=%s, %.2f -> %.2f (delta=%+.2f), group=%s",
-            self.entity_id, current_master, volume, delta,
-            self._multiroom_group,
+            "Group volume: master=%s -> %.2f (offsets per slave), group=%s",
+            self.entity_id, master_target, self._multiroom_group,
         )
 
         by_eid = {d.entity_id: d for d in self.hass.data[DOMAIN].entities}
-        group_entities = [by_eid[eid] for eid in self._multiroom_group if eid in by_eid]
+        # Always include the caller (the master) in the iteration even
+        # if the cached group list is empty - the poll cycle on some
+        # AudioPro firmwares briefly returns ``slaves=0`` and the
+        # join-grace window is not always enough to cover every race.
+        # Without this guard, a poll-cleared group would make
+        # set_group_volume a no-op on the master too.
+        group_entities: list = []
+        seen: set[str] = set()
+        if self.entity_id in by_eid:
+            group_entities.append(by_eid[self.entity_id])
+            seen.add(self.entity_id)
+        for eid in self._multiroom_group:
+            if eid in by_eid and eid not in seen:
+                group_entities.append(by_eid[eid])
+                seen.add(eid)
 
         for device in group_entities:
             if device.entity_id == self.entity_id:
-                target = volume
+                target = master_target
             else:
-                base = device.volume_level if device.volume_level is not None else current_master
-                target = base + delta
+                offset = getattr(device, "_volume_offset", 0) or 0
+                target = master_target + (offset / 100.0)
             final_volume = max(0.0, min(1.0, target))
             current = device.volume_level if device.volume_level is not None else "n/a"
             _LOGGER.debug(
-                "  %s: %s -> %.2f", device.entity_id, current, final_volume
+                "  %s: %s -> %.2f (offset=%+d)",
+                device.entity_id, current, final_volume,
+                getattr(device, "_volume_offset", 0) or 0,
             )
             await device.async_set_volume_level(final_volume)
 

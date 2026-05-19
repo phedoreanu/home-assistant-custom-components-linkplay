@@ -36,11 +36,22 @@ class _FakeDevice(LinkPlayVolumeControlsMixin):
 
 class TestSetVolume:
     @pytest.mark.asyncio
-    async def test_master_sends_slave_vol(self) -> None:
+    async def test_master_sends_vol_not_slave_vol(self) -> None:
+        """Master must use ``vol:N`` for its own HW volume.
+
+        Regression for v4.5.5: master previously sent ``slave_vol:N``,
+        which only broadcasts to slaves and leaves the master's hardware
+        volume unchanged. The next poll would then revert the cached
+        ``_volume`` back to the stale firmware value, and any group-wide
+        re-sync (e.g. a preset switch) would push that stale master
+        volume onto every slave.
+        """
         dev = _FakeDevice(is_master=True)
         await dev.async_set_volume_level(0.30)
         dev.call_linkplay_httpapi.assert_awaited_once()
-        assert "slave_vol:30" in dev.call_linkplay_httpapi.await_args.args[0]
+        cmd = dev.call_linkplay_httpapi.await_args.args[0]
+        assert cmd == "setPlayerCmd:vol:30"
+        assert "slave_vol" not in cmd
         assert dev._volume == 30
 
     @pytest.mark.asyncio

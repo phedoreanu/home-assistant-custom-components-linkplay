@@ -55,7 +55,7 @@ Each device can be configured individually via the "Configure" button on the int
 - **Multiroom Wi-Fi Direct**: Toggle to use Wi-Fi Direct (AP mode) for multiroom instead of Router mode.
 - **Turn Off LED**: Toggle to turn off the front LED (supported devices only).
 - **Volume Step Size**: Set the percentage step for volume changes (1-25).
-- **Crossfade (ms)**: Soften the abrupt audio cut when switching source / preset / URL by ramping the volume down → switching → ramping back up. Default 300 ms; set to 0 to disable. Total wall time added per switch is roughly the configured value plus a 200 ms settle gap.
+- **Volume Offset**: Signed percentage points (-100 to +100, default 0) applied on top of the master target when this device is a slave in a multiroom group and `linkplay.set_group_volume` is called on the master. Mirrors mini-media-player's per-entity `volume_offset`. Example: master at 0.50 with kitchen offset `-10` → kitchen lands at 0.40.
 
 ### YAML Configuration (Legacy)
 **Note:** YAML configuration is supported but considered legacy. Prefer the UI for new setups. Some advanced fields (`sources`, `common_sources`, `lastfm_api_key`, `uuid`) are only available via YAML; the UI options flow exposes only the most common ones. Unique IDs are now based on device UUIDs, not IP addresses.
@@ -200,16 +200,16 @@ It's also possible to use Home Assistant's [standard multiroom](https://www.home
 
 ### Group volume (`linkplay.set_group_volume`)
 
-Mirrors how mini-media-player's group slider works: `volume` is applied to the **master** speaker and every slave shifts by the **same delta** (new master − old master) from its current volume. Each slave keeps its relative offset from the master. Final values are clamped to `[0.0, 1.0]`.
+Master goes to `volume`; each slave goes to `volume + slave_volume_offset/100`, clamped to `[0.0, 1.0]`. Configure each slave's `Volume Offset` in the integration options for that device. Mirrors mini-media-player's per-entity offset behaviour.
 
 ```yaml
 service: linkplay.set_group_volume
 data:
   entity_id: media_player.living_room   # master of the group
-  volume: 0.5                           # new master volume; slaves shift by the delta
+  volume: 0.18                          # master target; slaves shift by their configured offset
 ```
 
-Example: master is at 0.40, kitchen at 0.30 (-0.10 offset), bedroom at 0.60 (+0.20 offset). Calling the service with `volume: 0.60` (delta +0.20) sets master → 0.60, kitchen → 0.50, bedroom → 0.80. A slave already at 1.0 stays at 1.0 when the master goes up; when the master comes back down the slave drops normally from there.
+Example: kitchen has offset `-10`, office has offset `-15`. Calling the service with `volume: 0.18` sets master → 0.18, kitchen → 0.08, office → 0.03. Independent of the master's pre-call volume — Bluetooth or standalone sessions that left the master loud no longer poison subsequent group-volume calls.
 
 #### Automation example
 

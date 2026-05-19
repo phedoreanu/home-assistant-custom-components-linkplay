@@ -68,6 +68,167 @@ class TestGroupMembersProperty:
         assert dev._multiroom_group == ["media_player.a"]
 
 
+class TestJoinPlayersSignature:
+    """Regression: HA media_player.join passes group_members as kwarg.
+
+    v4.5.6: the parameter was named ``slaves`` so HA core's call
+    ``await async_join_players(group_members=[...])`` raised
+    ``TypeError: got an unexpected keyword argument 'group_members'``.
+    The fix renames the parameter to match HA's contract.
+    """
+
+    @pytest.mark.asyncio
+    async def test_async_join_players_accepts_group_members_kwarg(self) -> None:
+        from custom_components.linkplay.multiroom_mixin import (
+            LinkPlayMultiroomMixin,
+        )
+
+        # Inspect signature directly: we only need to prove the kwarg name.
+        import inspect
+
+        sig = inspect.signature(LinkPlayMultiroomMixin.async_join_players)
+        assert "group_members" in sig.parameters
+        assert "slaves" not in sig.parameters
+
+    @pytest.mark.asyncio
+    async def test_async_join_players_routes_entities_to_async_join(
+        self,
+    ) -> None:
+        master = _make_device("master")
+        slave_a = _make_device("a")
+        slave_b = _make_device("b")
+        other = _make_device("other")
+        master.hass.data["linkplay"].entities = [master, slave_a, slave_b, other]
+        master.async_join = AsyncMock()
+
+        await master.async_join_players(
+            group_members=["media_player.a", "media_player.b"]
+        )
+
+        master.async_join.assert_awaited_once()
+        passed = master.async_join.await_args.args[0]
+        assert {e.entity_id for e in passed} == {
+            "media_player.a",
+            "media_player.b",
+        }
+
+
+class TestJoinGracePollWindow:
+    """v4.5.9: ``multiroom:getSlaveList`` returns ``slaves=0`` for several
+    seconds after a WiFi-direct ``ConnectMasterAp`` join on AudioPro
+    firmware. The master-side poll must keep the locally-built
+    ``_multiroom_group`` during that grace window, or
+    ``linkplay.set_group_volume`` finds an empty group when it runs
+    immediately after ``linkplay.join``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_poll_preserves_group_during_grace_when_firmware_says_zero(
+        self,
+    ) -> None:
+        from datetime import timedelta
+        from homeassistant.util.dt import utcnow
+
+        master = _make_device("master")
+        master.hass.data["linkplay"].entities = [master]
+        master._is_master = True
+        master._multiroom_group = [
+            "media_player.master",
+            "media_player.kitchen",
+        ]
+        master._multiroom_joinat = utcnow() - timedelta(seconds=2)
+        master.call_linkplay_httpapi = AsyncMock(
+            return_value={"slaves": 0, "slave_list": []}
+        )
+
+        await master._async_poll_multiroom_master_status()
+
+        assert master._is_master is True
+        assert master._multiroom_group == [
+            "media_player.master",
+            "media_player.kitchen",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_poll_clears_group_after_grace_when_firmware_says_zero(
+        self,
+    ) -> None:
+        from datetime import timedelta
+        from homeassistant.util.dt import utcnow
+
+        master = _make_device("master")
+        master.hass.data["linkplay"].entities = [master]
+        master._is_master = True
+        master._multiroom_group = [
+            "media_player.master",
+            "media_player.kitchen",
+        ]
+        master._multiroom_joinat = utcnow() - timedelta(seconds=30)
+        master.call_linkplay_httpapi = AsyncMock(
+            return_value={"slaves": 0, "slave_list": []}
+        )
+
+        await master._async_poll_multiroom_master_status()
+
+        assert master._is_master is False
+        assert master._multiroom_group == []
+
+    @pytest.mark.asyncio
+    async def test_poll_clears_grace_timestamp_when_firmware_confirms_slaves(
+        self,
+    ) -> None:
+        from homeassistant.util.dt import utcnow
+
+        master = _make_device("master")
+        kitchen = _make_device("kitchen")
+        master.hass.data["linkplay"].entities = [master, kitchen]
+        master._is_master = True
+        master._multiroom_group = [
+            "media_player.master",
+            "media_player.kitchen",
+        ]
+        master._multiroom_joinat = utcnow()
+        master.call_linkplay_httpapi = AsyncMock(
+            return_value={
+                "slaves": 1,
+                "slave_list": [
+                    {"name": "kitchen", "ip": "1.2.3.4", "volume": 50},
+                ],
+            }
+        )
+
+        await master._async_poll_multiroom_master_status()
+
+        assert master._multiroom_joinat is None
+        assert master._is_master is True
+        assert "media_player.kitchen" in master._multiroom_group
+
+    @pytest.mark.asyncio
+    async def test_poll_no_response_preserves_group_during_grace(
+        self,
+    ) -> None:
+        from datetime import timedelta
+        from homeassistant.util.dt import utcnow
+
+        master = _make_device("master")
+        master.hass.data["linkplay"].entities = [master]
+        master._is_master = True
+        master._multiroom_group = [
+            "media_player.master",
+            "media_player.kitchen",
+        ]
+        master._multiroom_joinat = utcnow() - timedelta(seconds=2)
+        master.call_linkplay_httpapi = AsyncMock(return_value=None)
+
+        await master._async_poll_multiroom_master_status()
+
+        assert master._is_master is True
+        assert master._multiroom_group == [
+            "media_player.master",
+            "media_player.kitchen",
+        ]
+
+
 class TestMultiroomGroupSetter:
     """Master pushes group to slaves via async_set_multiroom_group."""
 

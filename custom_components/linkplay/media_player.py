@@ -5,6 +5,7 @@ For more details about this platform, please refer to the documentation at
 https://github.com/phedoreanu/home-assistant-custom-components-linkplay
 """
 
+import asyncio
 import contextlib
 import voluptuous as vol
 
@@ -61,7 +62,6 @@ from .metadata import (
 )
 from .api_client_mixin import LinkPlayAPIClientMixin
 from .commands_mixin import LinkPlayCommandsMixin
-from .crossfade_mixin import LinkPlayCrossfadeMixin
 from .icecast_fetcher_mixin import LinkPlayIcecastFetcherMixin
 from .itunes_artwork_mixin import LinkPlayItunesArtworkMixin
 from .lastfm_mixin import LinkPlayLastFmMixin
@@ -79,13 +79,13 @@ from .const import (
     CONF_MULTIROOM_WIFIDIRECT,
     CONF_LEDOFF,
     CONF_VOLUME_STEP,
-    CONF_CROSSFADE_MS,
+    CONF_VOLUME_OFFSET,
     CONF_SOURCES,
     DEFAULT_ICECAST_UPDATE,
     DEFAULT_MULTIROOM_WIFIDIRECT,
     DEFAULT_LEDOFF,
     DEFAULT_VOLUME_STEP,
-    DEFAULT_CROSSFADE_MS,
+    DEFAULT_VOLUME_OFFSET,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -197,7 +197,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_LASTFM_API_KEY): cv.string,
         vol.Optional(CONF_UUID, default=''): cv.string,
         vol.Optional(CONF_VOLUME_STEP, default=DEFAULT_VOLUME_STEP): vol.All(int, vol.Range(min=1, max=25)),
-        vol.Optional(CONF_CROSSFADE_MS, default=DEFAULT_CROSSFADE_MS): vol.All(int, vol.Range(min=0, max=2000)),
+        vol.Optional(CONF_VOLUME_OFFSET, default=DEFAULT_VOLUME_OFFSET): vol.All(int, vol.Range(min=-100, max=100)),
     }
 )
 
@@ -227,7 +227,7 @@ async def async_setup_platform(hass, config, async_add_entities, _discovery_info
     multiroom_wifidirect = config.get(CONF_MULTIROOM_WIFIDIRECT)
     led_off = config.get(CONF_LEDOFF)
     volume_step = config.get(CONF_VOLUME_STEP)
-    crossfade_ms = config.get(CONF_CROSSFADE_MS, DEFAULT_CROSSFADE_MS)
+    volume_offset = config.get(CONF_VOLUME_OFFSET, DEFAULT_VOLUME_OFFSET)
     lastfm_api_key = config.get(CONF_LASTFM_API_KEY)
     uuid = config.get(CONF_UUID)
 
@@ -293,7 +293,7 @@ async def async_setup_platform(hass, config, async_add_entities, _discovery_info
                             lastfm_api_key,
                             uuid,
                             state,
-                            crossfade_ms=crossfade_ms)
+                            volume_offset=volume_offset)
 
     _LOGGER.info("[%s @ %s] adding media_player entity (YAML)", name, host)
     async_add_entities([linkplay])
@@ -330,9 +330,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         CONF_VOLUME_STEP,
         entry.data.get(CONF_VOLUME_STEP, DEFAULT_VOLUME_STEP)
     )
-    crossfade_ms = entry.options.get(
-        CONF_CROSSFADE_MS,
-        entry.data.get(CONF_CROSSFADE_MS, DEFAULT_CROSSFADE_MS)
+    volume_offset = entry.options.get(
+        CONF_VOLUME_OFFSET,
+        entry.data.get(CONF_VOLUME_OFFSET, DEFAULT_VOLUME_OFFSET)
     )
     lastfm_api_key = entry.data.get(CONF_LASTFM_API_KEY)
     uuid = entry.unique_id or ""
@@ -391,7 +391,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         lastfm_api_key,
         uuid,
         state,
-        crossfade_ms=crossfade_ms,
+        volume_offset=volume_offset,
     )
 
     _LOGGER.info("[%s @ %s] adding media_player entity", name, host)
@@ -411,7 +411,6 @@ class LinkPlayDevice(
     LinkPlayItunesArtworkMixin,
     LinkPlayLastFmMixin,
     LinkPlayVolumeControlsMixin,
-    LinkPlayCrossfadeMixin,
     LinkPlayMediaControlsMixin,
     MediaPlayerEntity,
 ):
@@ -430,7 +429,7 @@ class LinkPlayDevice(
                  lastfm_api_key,
                  uuid,
                  state,
-                 crossfade_ms: int = DEFAULT_CROSSFADE_MS):
+                 volume_offset: int = DEFAULT_VOLUME_OFFSET):
         """Initialize the media player.
 
         ``self.hass`` is populated by Home Assistant when the entity is
@@ -452,7 +451,10 @@ class LinkPlayDevice(
         self._state = state
         self._volume = 0
         self._volume_step = volume_step
-        self._crossfade_ms = crossfade_ms
+        # Per-device volume offset (signed percentage points, -100..+100)
+        # applied on top of the master target by linkplay.set_group_volume.
+        # Mirrors mini-media-player's ``volume_offset`` config option.
+        self._volume_offset = volume_offset
         self._led_off = led_off
         self._fadevol = False
         self._source = None
@@ -507,6 +509,12 @@ class LinkPlayDevice(
         self._multiroom_group = []
         self._multiroom_prevsrc = None
         self._multiroom_unjoinat = None
+        # Timestamp of the last successful ``async_join`` that
+        # populated ``_multiroom_group``. The master-side poll uses
+        # this to keep the just-built group through a brief grace
+        # window when ``multiroom:getSlaveList`` still reports zero
+        # slaves (WiFi-direct propagates slowly on AudioPro firmware).
+        self._multiroom_joinat = None
         self._wait_for_mcu = 0
         self._new_song = True
         self._unav_throttle = False
@@ -1306,10 +1314,8 @@ class LinkPlayDevice(
         return self._fw_ver
 
     async def async_play_media(self, media_type, media_id, **kwargs):
-        """Play media from a URL or localfile, with a brief crossfade around the switch."""
-        return await self._async_crossfade_switch(
-            self._async_play_media_impl(media_type, media_id, **kwargs)
-        )
+        """Play media from a URL or localfile."""
+        return await self._async_play_media_impl(media_type, media_id, **kwargs)
 
     async def _async_play_media_impl(self, media_type, media_id, **kwargs):
         _LOGGER.debug("Trying to play media. Device: %s, Media_type: %s, Media_id: %s", self.entity_id, media_type, media_id)
@@ -1435,8 +1441,8 @@ class LinkPlayDevice(
         return True
 
     async def async_select_source(self, source):
-        """Select input source, with a brief volume crossfade around the switch."""
-        await self._async_crossfade_switch(self._async_select_source_impl(source))
+        """Select input source."""
+        await self._async_select_source_impl(source)
 
     async def _async_select_source_impl(self, source):
         if not self._slave_mode:
@@ -1642,7 +1648,7 @@ class LinkPlayDevice(
         )
 
     async def async_preset_button(self, preset):
-        """Simulate pressing a physical preset button, with a brief crossfade."""
+        """Simulate pressing a physical preset button."""
         if self._preset_key is None or preset is None:
             return
         if self._slave_mode:
@@ -1654,15 +1660,43 @@ class LinkPlayDevice(
                 self.entity_id, preset, self._preset_key,
             )
             return
-        await self._async_crossfade_switch(self._async_preset_button_impl(preset))
+        await self._async_preset_button_impl(preset)
 
     async def _async_preset_button_impl(self, preset):
+        # Snapshot the master's intended volume before MCUKeyShortClick.
+        # AudioPro firmware restores the per-source saved volume on a
+        # preset switch, overriding whatever the user just set via
+        # set_group_volume / volume_set. Re-apply our locally tracked
+        # _volume after the switch so the firmware HW + HA cache match
+        # what the user asked for.
+        intended_vol = int(self._volume) if self._volume is not None else None
         value = await self.call_linkplay_httpapi(f"MCUKeyShortClick:{preset!s}", None)
         if value != "OK":
             _LOGGER.warning(
                 "Failed to recall preset %s. Device: %s, Got response: %s",
                 self.entity_id, preset, value,
             )
+            return
+        if intended_vol is not None:
+            await asyncio.sleep(0.3)
+            await self._set_volume_on_device(intended_vol, action="preset_restore_vol")
+            # Group members: re-apply each slave's offset-adjusted target
+            # so the firmware's per-source volume restore on the master
+            # doesn't desync the group either.
+            if self._is_master and self._multiroom_group:
+                by_eid = {
+                    d.entity_id: d
+                    for d in self.hass.data[DOMAIN].entities
+                }
+                for eid in self._multiroom_group:
+                    device = by_eid.get(eid)
+                    if device is None or device is self:
+                        continue
+                    offset = getattr(device, "_volume_offset", 0) or 0
+                    target_pct = max(0, min(100, intended_vol + offset))
+                    await device._set_volume_on_device(
+                        target_pct, action="preset_restore_slave_vol",
+                    )
 
     async def async_play_track(self, track):
         """Play media track by name found in the tracks list."""

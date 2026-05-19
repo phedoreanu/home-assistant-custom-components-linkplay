@@ -38,6 +38,11 @@ def _make_device(name: str, host: str = "1.2.3.4") -> LinkPlayDevice:
     dev.entity_id = f"media_player.{name}"
     dev.hass = hass
     dev.async_write_ha_state = MagicMock()
+    # Tests that exercise async_join don't need to wait 5 s for the
+    # post-join slave-IP poll; cap it at one fast attempt unless the
+    # individual test re-enables it.
+    dev._slave_ip_poll_interval = 0
+    dev._slave_ip_poll_max = 0
     return dev
 
 
@@ -100,6 +105,118 @@ class TestAsyncJoin:
 
         assert master._multiroom_group == []
         slave.call_linkplay_httpapi.assert_not_called()
+
+
+class TestJoinAwaitsSlaveIps:
+    """v4.5.10: ``async_join`` blocks until the firmware reflects each
+    new slave's WiFi-direct IP via ``multiroom:getSlaveList``. Without
+    those IPs, ``multiroom:SlaveVolume`` is misaddressed to the master's
+    own host and silently no-ops, so scripts that chained
+    ``linkplay.join`` -> ``linkplay.set_group_volume`` left the slaves
+    at their firmware-inherited join volume.
+    """
+
+    @pytest.mark.asyncio
+    async def test_join_does_not_set_slave_ip_to_master_host(self) -> None:
+        master, (slave,) = _make_group("master", ["slave"])
+        master.call_linkplay_httpapi = AsyncMock(return_value="OK")
+        slave.call_linkplay_httpapi = AsyncMock(return_value="OK")
+
+        await master.async_join([slave])
+
+        # Regression: the previous code wrote master._host into the
+        # slave's _slave_ip, which made multiroom:SlaveVolume target
+        # the master and silently fail.
+        assert slave._slave_ip != master._host
+
+    @pytest.mark.asyncio
+    async def test_join_populates_slave_ip_from_getslavelist(self) -> None:
+        master, (slave,) = _make_group("master", ["slave"])
+        slave.call_linkplay_httpapi = AsyncMock(return_value="OK")
+        # Master returns OK to the ConnectMasterAp on the slave (slave's
+        # mock above), then the next call - which is getSlaveList -
+        # returns the populated list with the slave's WiFi-direct IP.
+        master.call_linkplay_httpapi = AsyncMock(side_effect=[
+            {
+                "slaves": 1,
+                "slave_list": [
+                    {"name": "slave", "ip": "10.10.10.93", "volume": 50},
+                ],
+            },
+        ])
+        master._slave_ip_poll_max = 5
+        master._slave_ip_poll_interval = 0
+
+        await master.async_join([slave])
+
+        assert slave._slave_ip == "10.10.10.93"
+
+    @pytest.mark.asyncio
+    async def test_join_syncs_slave_volume_for_delta_base(self) -> None:
+        """v4.5.12: ``set_group_volume`` is delta-preserving; for the
+        shift to land correctly each slave's cached ``_volume`` must
+        reflect the post-join firmware value, not the stale pre-join
+        cache. ``_await_slave_ips`` now copies ``volume`` from the
+        ``multiroom:getSlaveList`` entry."""
+        master, (slave,) = _make_group("master", ["slave"])
+        slave._volume = 9  # stale pre-join cache
+        slave.call_linkplay_httpapi = AsyncMock(return_value="OK")
+        master.call_linkplay_httpapi = AsyncMock(side_effect=[
+            {
+                "slaves": 1,
+                "slave_list": [
+                    {"name": "slave", "ip": "10.10.10.93", "volume": 34},
+                ],
+            },
+        ])
+        master._slave_ip_poll_max = 5
+        master._slave_ip_poll_interval = 0
+
+        await master.async_join([slave])
+
+        assert slave._volume == 34
+
+    @pytest.mark.asyncio
+    async def test_join_retries_until_firmware_reports_slaves(
+        self,
+    ) -> None:
+        master, (slave,) = _make_group("master", ["slave"])
+        slave.call_linkplay_httpapi = AsyncMock(return_value="OK")
+        # First two polls return slaves=0 (firmware still settling);
+        # third poll returns the real entry.
+        master.call_linkplay_httpapi = AsyncMock(side_effect=[
+            {"slaves": 0, "slave_list": []},
+            {"slaves": 0, "slave_list": []},
+            {
+                "slaves": 1,
+                "slave_list": [
+                    {"name": "slave", "ip": "10.10.10.93", "volume": 50},
+                ],
+            },
+        ])
+        master._slave_ip_poll_max = 5
+        master._slave_ip_poll_interval = 0
+
+        await master.async_join([slave])
+
+        assert slave._slave_ip == "10.10.10.93"
+        assert master.call_linkplay_httpapi.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_join_gives_up_after_max_attempts(self) -> None:
+        """Master should not block forever if the firmware never reports
+        the slave in its multiroom list."""
+        master, (slave,) = _make_group("master", ["slave"])
+        slave.call_linkplay_httpapi = AsyncMock(return_value="OK")
+        master.call_linkplay_httpapi = AsyncMock(
+            return_value={"slaves": 0, "slave_list": []}
+        )
+        master._slave_ip_poll_max = 3
+        master._slave_ip_poll_interval = 0
+
+        await master.async_join([slave])
+
+        assert master.call_linkplay_httpapi.await_count == 3
 
 
 class TestAsyncUnjoinAll:

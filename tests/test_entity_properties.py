@@ -57,8 +57,6 @@ class TestConstructorDefaults:
         assert dev._is_master is False
         assert dev._slave_mode is False
         assert dev._uuid == "uuid-1234"
-        # crossfade default plumbed through:
-        assert dev._crossfade_ms == 300
 
 
 class TestNameAndIcon:
