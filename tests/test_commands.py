@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -18,7 +18,6 @@ class _FakeDevice(LinkPlayCommandsMixin):
         self.call_linkplay_httpapi = AsyncMock(return_value="OK")
         self.call_linkplay_tcpuart = AsyncMock(return_value="MCU+OK")
         self.hass = MagicMock()
-        self.hass.components.persistent_notification.async_create = MagicMock()
 
 
 class TestCommandDispatch:
@@ -60,16 +59,19 @@ class TestCommandDispatch:
     @pytest.mark.asyncio
     async def test_set_ap_ssid_empty_returns_help_text(self) -> None:
         dev = _FakeDevice()
-        await dev.async_execute_command("SetApSSIDName: ", notif=True)
+        with patch(
+            "custom_components.linkplay.commands_mixin.persistent_notification.async_create"
+        ) as notify:
+            await dev.async_execute_command("SetApSSIDName: ", notif=True)
         dev.call_linkplay_httpapi.assert_not_awaited()
-        notif_body = dev.hass.components.persistent_notification.async_create.call_args.args[0]
+        notif_body = notify.call_args.args[1]
         assert "SSID not specified" in notif_body
 
     @pytest.mark.asyncio
     async def test_write_device_name_updates_self_name(self) -> None:
         dev = _FakeDevice()
         await dev.async_execute_command("WriteDeviceNameToUnit: Kitchen Speaker", notif=False)
-        assert dev.call_linkplay_httpapi.await_args.args[0] == "setDeviceName:Kitchen Speaker"
+        assert dev.call_linkplay_httpapi.await_args.args[0] == "setDeviceName:Kitchen%20Speaker"
         assert dev._name == "Kitchen Speaker"
 
     @pytest.mark.asyncio
@@ -114,13 +116,19 @@ class TestCommandDispatch:
     @pytest.mark.asyncio
     async def test_unknown_command_warns(self) -> None:
         dev = _FakeDevice()
-        await dev.async_execute_command("DanceParty", notif=True)
+        with patch(
+            "custom_components.linkplay.commands_mixin.persistent_notification.async_create"
+        ) as notify:
+            await dev.async_execute_command("DanceParty", notif=True)
         dev.call_linkplay_httpapi.assert_not_awaited()
-        notif_body = dev.hass.components.persistent_notification.async_create.call_args.args[0]
+        notif_body = notify.call_args.args[1]
         assert "No such command" in notif_body
 
     @pytest.mark.asyncio
     async def test_notify_false_skips_persistent_notification(self) -> None:
         dev = _FakeDevice()
-        await dev.async_execute_command("PromptEnable", notif=False)
-        dev.hass.components.persistent_notification.async_create.assert_not_called()
+        with patch(
+            "custom_components.linkplay.commands_mixin.persistent_notification.async_create"
+        ) as notify:
+            await dev.async_execute_command("PromptEnable", notif=False)
+        notify.assert_not_called()

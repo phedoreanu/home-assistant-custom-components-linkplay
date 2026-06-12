@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -236,7 +236,6 @@ class TestPresetSnapViaUpnp:
     @pytest.mark.asyncio
     async def test_missing_preset_key_posts_notification(self) -> None:
         dev = self._spotify_device()
-        dev.hass.components.persistent_notification.async_create = MagicMock()
 
         set_preset = MagicMock()
         set_preset.async_call = AsyncMock(return_value={"Result": "1"})
@@ -255,5 +254,8 @@ class TestPresetSnapViaUpnp:
         )
         dev._upnp_device.service = MagicMock(return_value=service)
 
-        await dev.async_preset_snap_via_upnp("1")
-        dev.hass.components.persistent_notification.async_create.assert_called_once()
+        with patch(
+            "custom_components.linkplay.upnp_mixin.persistent_notification.async_create"
+        ) as notify:
+            await dev.async_preset_snap_via_upnp("1")
+        notify.assert_called_once()

@@ -15,6 +15,9 @@ import time
 import xml.etree.ElementTree as ET
 
 import validators
+from defusedxml import ElementTree as DET
+
+from homeassistant.components import persistent_notification
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,7 +59,7 @@ class LinkPlayUPnPMixin:
             return
 
         try:
-            xml_tree = ET.fromstring(media_metadata)
+            xml_tree = DET.fromstring(media_metadata)
         except ET.ParseError as error:
             # LinkPlay DIDL-Lite payloads occasionally contain
             # unescaped ampersands or non-Latin chars that the stdlib
@@ -117,7 +120,7 @@ class LinkPlayUPnPMixin:
         if media_metadata is None:
             return
 
-        xml_tree = ET.fromstring(media_metadata)
+        xml_tree = DET.fromstring(media_metadata)
 
         trackq: list[str] = []
         for playlist in xml_tree:
@@ -161,7 +164,13 @@ class LinkPlayUPnPMixin:
             _LOGGER.debug("GetKeyMapping UPNP error: %s", self.entity_id)
             return
 
-        xml_tree = ET.fromstring(preset_map_raw)
+        if preset_map_raw is None:
+            _LOGGER.debug(
+                "GetKeyMapping returned no QueueContext for: %s", self.entity_id
+            )
+            return
+
+        xml_tree = DET.fromstring(preset_map_raw)
 
         if xml_tree.find(f"Key{presetnum}") is None:
             _LOGGER.error(
@@ -169,7 +178,8 @@ class LinkPlayUPnPMixin:
                 "first with the mobile app for this player. Tree: %s",
                 self.entity_id, presetnum, preset_map_raw,
             )
-            self.hass.components.persistent_notification.async_create(
+            persistent_notification.async_create(
+                self.hass,
                 "<b>Preset Map error:</b><br><br><br>This player can't store "
                 "presets yet!<br>Please create a preset first manually with "
                 "the mobile app for this player and then try again.",

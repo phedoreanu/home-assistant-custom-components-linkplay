@@ -89,16 +89,17 @@ class LinkPlayAPIClientMixin:
             )
             return False
 
-        if response.status != HTTPStatus.OK:
-            _LOGGER.error(
-                "For: %s (%s) Get failed, response code: %s",
-                self._name, self._host, response.status,
-            )
-            return False
+        async with response:
+            if response.status != HTTPStatus.OK:
+                _LOGGER.error(
+                    "For: %s (%s) Get failed, response code: %s",
+                    self._name, self._host, response.status,
+                )
+                return False
 
-        if jsn:
-            return await response.json(content_type=None)
-        data = await response.text()
+            if jsn:
+                return await response.json(content_type=None)
+            data = await response.text()
         _LOGGER.debug("For: %s cmd: %s resp: %s", self._name, cmd, data)
         return data
 

@@ -15,14 +15,15 @@
   "requirements": [
     "async-upnp-client>=0.27",
     "validators~=0.12",
-    "chardet>=4.0.0"
+    "chardet>=4.0.0",
+    "defusedxml>=0.7.1"
   ],
   "ssdp": [
     {"manufacturer": "Linkplay"},
     {"manufacturer": "LinkPlay"},
     {"deviceType": "urn:schemas-upnp-org:device:MediaRenderer:1", "manufacturer": "Linkplay Technology Inc."}
   ],
-  "version": "4.5.15",
+  "version": "4.5.16",
   "zeroconf": [
     {"type": "_linkplay._tcp.local."}
   ]

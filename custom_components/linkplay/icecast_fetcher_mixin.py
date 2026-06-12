@@ -67,9 +67,10 @@ class LinkPlayIcecastFetcherMixin:
             icy_name, icy_metaint, chunks = await self.hass.async_add_executor_job(
                 _fetch_icecast_headers_and_chunks, self._media_uri_final,
             )
-        except Exception:
+        except Exception as error:
             _LOGGER.debug(
-                "For: %s Metadata error: %s", self._name, self._media_uri_final,
+                "For: %s Metadata error on %s: %s",
+                self._name, self._media_uri_final, error,
             )
             self._media_title = None
             self._media_artist = None

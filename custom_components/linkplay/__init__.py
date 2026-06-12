@@ -178,8 +178,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
         elif service.service == SERVICE_UNJOIN:
             _LOGGER.debug("**UNJOIN** entities: %s", entities)
-            masters = [entities for entities in entities
-                       if entities.is_master]
+            masters = [e for e in entities if e.is_master]
             if masters:
                 for master in masters:
                     await master.async_unjoin_all()

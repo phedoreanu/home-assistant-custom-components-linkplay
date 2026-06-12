@@ -15,6 +15,9 @@ import logging
 import time
 from random import choice
 from string import ascii_letters
+from urllib.parse import quote
+
+from homeassistant.components import persistent_notification
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,7 +54,7 @@ class LinkPlayCommandsMixin:
         elif command.startswith("SetApSSIDName:"):
             ssidnam = command.removeprefix("SetApSSIDName:").strip()
             if ssidnam:
-                value = await self.call_linkplay_httpapi(f"setSSID:{ssidnam}", None)
+                value = await self.call_linkplay_httpapi(f"setSSID:{quote(ssidnam)}", None)
                 if value == "OK":
                     value = f"{value}, SoftAP SSID set to: {ssidnam}"
             else:
@@ -59,7 +62,7 @@ class LinkPlayCommandsMixin:
         elif command.startswith("WriteDeviceNameToUnit:"):
             devnam = command.removeprefix("WriteDeviceNameToUnit:").strip()
             if devnam:
-                value = await self.call_linkplay_httpapi(f"setDeviceName:{devnam}", None)
+                value = await self.call_linkplay_httpapi(f"setDeviceName:{quote(devnam)}", None)
                 if value == "OK":
                     self._name = devnam
                     value = f"{value}, name set to: {self._name}"
@@ -87,7 +90,8 @@ class LinkPlayCommandsMixin:
         _LOGGER.debug("Player %s executed command: %s, result: %s", self.entity_id, command, value)
 
         if notif:
-            self.hass.components.persistent_notification.async_create(
+            persistent_notification.async_create(
+                self.hass,
                 f"<b>Executed command:</b><br>{command}<br><b>Result:</b><br>{value}",
                 title=self.entity_id,
             )

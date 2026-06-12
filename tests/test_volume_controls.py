@@ -168,7 +168,7 @@ class TestMute:
         dev = _FakeDevice(slave_mode=True, wifidirect=True)
         await dev.async_mute_volume(True)
         cmd = dev._master.call_linkplay_httpapi.await_args.args[0]
-        assert cmd == "multiroom:SlaveVolume:5.6.7.8:1"
+        assert cmd == "multiroom:SlaveMute:5.6.7.8:1"
 
     @pytest.mark.asyncio
     async def test_mute_non_ok_leaves_state(self) -> None:
@@ -176,3 +176,34 @@ class TestMute:
         dev.call_linkplay_httpapi = AsyncMock(return_value="FAIL")
         await dev.async_mute_volume(True)
         assert dev._muted is False
+
+    @pytest.mark.asyncio
+    async def test_mute_starts_grace_window(self) -> None:
+        """A successful mute command must start the stale-poll grace
+        window so an in-flight getPlayerStatus response can't revert it."""
+        dev = _FakeDevice()
+        assert dev._within_mute_grace() is False
+        await dev.async_mute_volume(True)
+        assert dev._within_mute_grace() is True
+
+    @pytest.mark.asyncio
+    async def test_mute_non_ok_does_not_start_grace(self) -> None:
+        dev = _FakeDevice()
+        dev.call_linkplay_httpapi = AsyncMock(return_value="FAIL")
+        await dev.async_mute_volume(True)
+        assert dev._within_mute_grace() is False
+
+    @pytest.mark.asyncio
+    async def test_mute_wifidirect_slave_without_master_noops(self) -> None:
+        """Master reference lost (entity reload) must not crash."""
+        dev = _FakeDevice(slave_mode=True, wifidirect=True)
+        dev._master = None
+        await dev.async_mute_volume(True)
+        assert dev._muted is False
+
+    @pytest.mark.asyncio
+    async def test_volume_wifidirect_slave_without_master_noops(self) -> None:
+        dev = _FakeDevice(slave_mode=True, wifidirect=True)
+        dev._master = None
+        await dev.async_set_volume_level(0.20)
+        dev.call_linkplay_httpapi.assert_not_awaited()

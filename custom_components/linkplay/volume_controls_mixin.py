@@ -44,6 +44,14 @@ class LinkPlayVolumeControlsMixin:
             and utcnow() < volume_cmd_at + VOLUME_CMD_GRACE
         )
 
+    def _within_mute_grace(self) -> bool:
+        """True while a recently commanded mute outranks polled values."""
+        mute_cmd_at = getattr(self, "_mute_cmd_at", None)
+        return (
+            mute_cmd_at is not None
+            and utcnow() < mute_cmd_at + VOLUME_CMD_GRACE
+        )
+
     async def _set_volume_on_device(self, volume: int, *, action: str) -> None:
         """Send a volume command to whichever device should receive it.
 
@@ -67,7 +75,7 @@ class LinkPlayVolumeControlsMixin:
             cmd = f"setPlayerCmd:vol:{volume_s}"
             value = await self.call_linkplay_httpapi(cmd, None)
         else:
-            if self._snapshot_active:
+            if self._snapshot_active or self._master is None:
                 return
             value = await self._master.call_linkplay_httpapi(
                 f"multiroom:SlaveVolume:{self._slave_ip}:{volume_s}", None,
@@ -121,12 +129,15 @@ class LinkPlayVolumeControlsMixin:
             )
             value = await self.call_linkplay_httpapi(cmd, None)
         else:
+            if self._master is None:
+                return
             value = await self._master.call_linkplay_httpapi(
-                f"multiroom:SlaveVolume:{self._slave_ip}:{flag}", None,
+                f"multiroom:SlaveMute:{self._slave_ip}:{flag}", None,
             )
 
         if value == "OK":
             self._muted = bool(int(mute))
+            self._mute_cmd_at = utcnow()
         else:
             _LOGGER.warning(
                 "Failed mute/unmute volume. Device: %s, Got response: %s",

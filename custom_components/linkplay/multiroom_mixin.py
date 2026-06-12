@@ -171,13 +171,12 @@ class LinkPlayMultiroomMixin:
                             await device.async_set_sound_mode(self._sound_mode)
                             await device.async_set_features(self._features)
 
-                    # Push the freshly-built group list once to every
-                    # entity already in the group. (The original code
-                    # nested this inside `for slave in slaves`, so it
-                    # ran N times with identical work.)
-                    for device in self.hass.data[DOMAIN].entities:
-                        if device.entity_id in self._multiroom_group:
-                            await device.async_set_multiroom_group(self._multiroom_group)
+                # Push the freshly-built group list once to every
+                # entity already in the group, after all slaves have
+                # been processed.
+                for device in self.hass.data[DOMAIN].entities:
+                    if device.entity_id in self._multiroom_group:
+                        await device.async_set_multiroom_group(self._multiroom_group)
 
             elif not self._within_join_grace():
                 # Firmware says no slaves and we're outside the

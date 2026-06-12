@@ -129,7 +129,14 @@ class LinkPlaySnapshotMixin:
             self._state = self._snap_state
 
         if self._snap_volume != 0:
-            await self.call_linkplay_httpapi(f"setPlayerCmd:vol:{self._snap_volume}", None)
+            value = await self.call_linkplay_httpapi(
+                f"setPlayerCmd:vol:{self._snap_volume}", None
+            )
+            if value != "OK":
+                _LOGGER.warning(
+                    "Failed to restore volume. Device: %s, Got response: %s",
+                    self.entity_id, value,
+                )
             self._snap_volume = 0
 
         self._playing_tts = False
@@ -145,8 +152,10 @@ class LinkPlaySnapshotMixin:
             self._snap_spotify_volumeonly = False
 
         elif self._snap_source != "Network":
-            self._snapshot_active = False
+            # Keep the snapshot flagged active until the source switch
+            # completes, consistent with the Spotify and URI branches.
             await self.async_select_source(self._snap_source)
+            self._snapshot_active = False
             self._snap_source = None
 
         elif self._snap_uri is not None:

@@ -640,9 +640,10 @@ class LinkPlayDevice(
                 if device_status is not None and isinstance(device_status, dict):
                     if self._state == STATE_UNAVAILABLE:
                         self._state = STATE_IDLE
-                    self._wifi_channel = device_status['WifiChannel']
-                    self._ssid = binascii.hexlify(device_status['ssid'].encode('utf-8'))
-                    self._ssid = self._ssid.decode()
+                    self._wifi_channel = device_status.get('WifiChannel')
+                    ssid = device_status.get('ssid')
+                    if ssid is not None:
+                        self._ssid = binascii.hexlify(ssid.encode('utf-8')).decode()
 
                     with contextlib.suppress(KeyError):
                         self._uuid = device_status['uuid']
@@ -717,7 +718,9 @@ class LinkPlayDevice(
             # trust the locally commanded volume for a short grace window.
             if not self._within_volume_grace():
                 self._volume = self._player_statdata['vol']
-            self._muted = bool(int(self._player_statdata['mute']))
+            # Same stale-poll protection for mute as for volume above.
+            if not self._within_mute_grace():
+                self._muted = bool(int(self._player_statdata['mute']))
             self._sound_mode = SOUND_MODES.get(self._player_statdata['eq'])
 
             self._shuffle = {
@@ -1453,7 +1456,7 @@ class LinkPlayDevice(
                 self._wait_for_mcu = 0.4
             return True
 
-        if not self._snapshot_active:
+        if not self._snapshot_active and self._master is not None:
             await self._master.async_play_media(media_type, media_id)
         return True
 
@@ -1536,7 +1539,7 @@ class LinkPlayDevice(
                             await slave.async_set_source(source)
                 else:
                     _LOGGER.warning("Failed to select source. Device: %s, Got response: %s", self.entity_id, value)
-        else:
+        elif self._master is not None:
             await self._master.async_select_source(source)
 
     async def async_select_sound_mode(self, sound_mode):
@@ -1552,7 +1555,7 @@ class LinkPlayDevice(
                         await slave.async_set_sound_mode(sound_mode)
             else:
                 _LOGGER.warning("Failed to set sound mode. Device: %s, Got response: %s", self.entity_id, value)
-        else:
+        elif self._master is not None:
             await self._master.async_select_sound_mode(sound_mode)
 
     async def async_set_shuffle(self, shuffle):
@@ -1569,7 +1572,7 @@ class LinkPlayDevice(
             value = await self.call_linkplay_httpapi(f"setPlayerCmd:loopmode:{mode}", None)
             if value != "OK":
                 _LOGGER.warning("Failed to change shuffle mode. Device: %s, Got response: %s", self.entity_id, value)
-        else:
+        elif self._master is not None:
             await self._master.async_set_shuffle(shuffle)
 
     async def async_set_repeat(self, repeat):
@@ -1584,7 +1587,7 @@ class LinkPlayDevice(
             value = await self.call_linkplay_httpapi(f"setPlayerCmd:loopmode:{mode}", None)
             if value != "OK":
                 _LOGGER.warning("Failed to change repeat mode. Device: %s, Got response: %s", self.entity_id, value)
-        else:
+        elif self._master is not None:
             await self._master.async_set_repeat(repeat)
 
     async def async_get_local_mediasource_metadata_from_path(self):
@@ -1669,7 +1672,8 @@ class LinkPlayDevice(
         if self._preset_key is None or preset is None:
             return
         if self._slave_mode:
-            await self._master.async_preset_button(preset)
+            if self._master is not None:
+                await self._master.async_preset_button(preset)
             return
         if not (0 < int(preset) <= self._preset_key):
             _LOGGER.warning(
@@ -1784,7 +1788,8 @@ class LinkPlayDevice(
                 self._ice_skip_throt = False
                 self._unav_throttle = False
                 return True
-        await self._master.async_play_track(track)
+        if self._master is not None:
+            await self._master.async_play_track(track)
         return True
 
     _USB_DISK_ROOT_ID = "linkplay_udisk"
