@@ -118,6 +118,35 @@ class TestVolumeUpDown:
         dev.call_linkplay_httpapi.assert_not_awaited()
 
 
+class TestVolumeCmdGrace:
+    """v4.5.15: a successful volume command stamps ``_volume_cmd_at``;
+    within VOLUME_CMD_GRACE of it polls must not overwrite ``_volume``
+    with a (possibly stale, in-flight) device-reported value."""
+
+    @pytest.mark.asyncio
+    async def test_successful_command_stamps_grace(self) -> None:
+        dev = _FakeDevice()
+        assert dev._within_volume_grace() is False
+        await dev.async_set_volume_level(0.42)
+        assert dev._within_volume_grace() is True
+
+    @pytest.mark.asyncio
+    async def test_failed_command_does_not_stamp_grace(self) -> None:
+        dev = _FakeDevice()
+        dev.call_linkplay_httpapi = AsyncMock(return_value="FAIL")
+        await dev.async_set_volume_level(0.42)
+        assert dev._within_volume_grace() is False
+
+    def test_grace_expires(self) -> None:
+        from datetime import timedelta
+
+        from homeassistant.util.dt import utcnow
+
+        dev = _FakeDevice()
+        dev._volume_cmd_at = utcnow() - timedelta(seconds=10)
+        assert dev._within_volume_grace() is False
+
+
 class TestMute:
     @pytest.mark.asyncio
     async def test_mute_master(self) -> None:

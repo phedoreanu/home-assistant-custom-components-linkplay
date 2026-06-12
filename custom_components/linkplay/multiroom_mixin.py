@@ -155,7 +155,12 @@ class LinkPlayMultiroomMixin:
                             await device.async_set_slave_mode(True)
                             await device.async_set_media_title(self._media_title)
                             await device.async_set_media_artist(self._media_artist)
-                            await device.async_set_volume(slave['volume'])
+                            # Same stale-poll guard as the master's own
+                            # getPlayerStatus handler: a slave-list
+                            # response in flight while the group volume
+                            # changed would write the old value back.
+                            if not device._within_volume_grace():
+                                await device.async_set_volume(slave['volume'])
                             await device.async_set_state(self.state)
                             await device.async_set_slave_ip(slave['ip'])
                             await device.async_set_media_image_url(self._media_image_url)

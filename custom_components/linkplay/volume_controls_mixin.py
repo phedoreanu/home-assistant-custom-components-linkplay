@@ -16,14 +16,33 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import timedelta
+
+from homeassistant.util.dt import utcnow
 
 _LOGGER = logging.getLogger(__name__)
 
 _MAX_VOL = 100
 
+# How long a locally commanded volume outranks values reported by the
+# device. A getPlayerStatus (or multiroom:getSlaveList) response that
+# was already in flight when the user changed the volume carries the
+# pre-change value; without this window the poll handler writes that
+# stale value back into ``_volume``, and a preset switch that snapshots
+# ``_volume`` right then re-applies the OLD volume to the whole group.
+VOLUME_CMD_GRACE = timedelta(seconds=3)
+
 
 class LinkPlayVolumeControlsMixin:
     """Volume up/down/set/mute service handlers."""
+
+    def _within_volume_grace(self) -> bool:
+        """True while a recently commanded volume outranks polled values."""
+        volume_cmd_at = getattr(self, "_volume_cmd_at", None)
+        return (
+            volume_cmd_at is not None
+            and utcnow() < volume_cmd_at + VOLUME_CMD_GRACE
+        )
 
     async def _set_volume_on_device(self, volume: int, *, action: str) -> None:
         """Send a volume command to whichever device should receive it.
@@ -56,6 +75,7 @@ class LinkPlayVolumeControlsMixin:
 
         if value == "OK":
             self._volume = volume
+            self._volume_cmd_at = utcnow()
         else:
             _LOGGER.warning(
                 "Failed to %s. Device: %s, Got response: %s",

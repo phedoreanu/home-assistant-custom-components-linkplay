@@ -133,6 +133,14 @@ MROOM_UJWDIR = timedelta(seconds=20)
 MROOM_UJWROU = timedelta(seconds=3)
 SPOTIFY_PAUSED_TIMEOUT = timedelta(seconds=300)
 AUTOIDLE_STATE_TIMEOUT = timedelta(seconds=1)
+# Verify window after a preset switch: the firmware applies its
+# per-source saved volume at an unpredictable moment during stream
+# startup / fade-in, so the re-applied volume is checked and re-sent
+# until it sticks (PRESET_VOL_CHECKS reads, PRESET_VOL_CHECK_INTERVAL
+# seconds apart, accepted after PRESET_VOL_CONFIRMS consecutive matches).
+PRESET_VOL_CHECKS = 6
+PRESET_VOL_CHECK_INTERVAL = 0.5
+PRESET_VOL_CONFIRMS = 2
 #PARALLEL_UPDATES = 0
 
 CUT_EXTENSIONS = ['mp3', 'mp2', 'm2a', 'mpg', 'wav', 'aac', 'flac', 'flc', 'm4a', 'ape', 'wma', 'ac3', 'ogg']
@@ -450,6 +458,10 @@ class LinkPlayDevice(
         self._icon = ICON_DEFAULT
         self._state = state
         self._volume = 0
+        # When the last successful local volume command was sent; polls
+        # within VOLUME_CMD_GRACE of it must not overwrite _volume with
+        # a (possibly stale) device-reported value.
+        self._volume_cmd_at = None
         self._volume_step = volume_step
         # Per-device volume offset (signed percentage points, -100..+100)
         # applied on top of the master target by linkplay.set_group_volume.
@@ -699,7 +711,12 @@ class LinkPlayDevice(
             if not self._is_master and not self._slave_mode:
                 self._master = None
                 self._multiroom_group = []
-            self._volume = self._player_statdata['vol']
+            # A poll response that was in flight while the user changed
+            # the volume (or while the firmware was still restoring its
+            # per-source volume mid-preset-switch) carries a stale value;
+            # trust the locally commanded volume for a short grace window.
+            if not self._within_volume_grace():
+                self._volume = self._player_statdata['vol']
             self._muted = bool(int(self._player_statdata['mute']))
             self._sound_mode = SOUND_MODES.get(self._player_statdata['eq'])
 
@@ -1677,26 +1694,57 @@ class LinkPlayDevice(
                 self.entity_id, preset, value,
             )
             return
-        if intended_vol is not None:
-            await asyncio.sleep(0.3)
-            await self._set_volume_on_device(intended_vol, action="preset_restore_vol")
-            # Group members: re-apply each slave's offset-adjusted target
-            # so the firmware's per-source volume restore on the master
-            # doesn't desync the group either.
-            if self._is_master and self._multiroom_group:
-                by_eid = {
-                    d.entity_id: d
-                    for d in self.hass.data[DOMAIN].entities
-                }
-                for eid in self._multiroom_group:
-                    device = by_eid.get(eid)
-                    if device is None or device is self:
-                        continue
-                    offset = getattr(device, "_volume_offset", 0) or 0
-                    target_pct = max(0, min(100, intended_vol + offset))
-                    await device._set_volume_on_device(
-                        target_pct, action="preset_restore_slave_vol",
-                    )
+        if intended_vol is None:
+            return
+        await asyncio.sleep(0.3)
+        await self._preset_reapply_volume(intended_vol)
+        # The firmware restores its per-source volume at an unpredictable
+        # moment during stream startup / fade-in, so a single re-apply can
+        # land too early (firmware overwrites it later) or get eaten
+        # (commands are ignored during fade-in — same behaviour the
+        # snapshot-restore path in async_set_volume_level works around).
+        # Read the volume back and re-send until it sticks.
+        confirms = 0
+        for _ in range(PRESET_VOL_CHECKS):
+            await asyncio.sleep(PRESET_VOL_CHECK_INTERVAL)
+            status = await self.call_linkplay_httpapi("getPlayerStatus", True)
+            current = None
+            if isinstance(status, dict):
+                try:
+                    current = int(status['vol'])
+                except (KeyError, TypeError, ValueError):
+                    current = None
+            if current == intended_vol:
+                confirms += 1
+                if confirms >= PRESET_VOL_CONFIRMS:
+                    return
+            elif current is not None:
+                confirms = 0
+                await self._preset_reapply_volume(intended_vol)
+        _LOGGER.debug(
+            "Preset %s: volume %s not confirmed after %s checks. Device: %s",
+            preset, intended_vol, PRESET_VOL_CHECKS, self.entity_id,
+        )
+
+    async def _preset_reapply_volume(self, intended_vol):
+        """Re-send the intended volume to this device and, when it is a
+        group master, each slave's offset-adjusted target — so the
+        firmware's per-source volume restore doesn't desync the group."""
+        await self._set_volume_on_device(intended_vol, action="preset_restore_vol")
+        if self._is_master and self._multiroom_group:
+            by_eid = {
+                d.entity_id: d
+                for d in self.hass.data[DOMAIN].entities
+            }
+            for eid in self._multiroom_group:
+                device = by_eid.get(eid)
+                if device is None or device is self:
+                    continue
+                offset = getattr(device, "_volume_offset", 0) or 0
+                target_pct = max(0, min(100, intended_vol + offset))
+                await device._set_volume_on_device(
+                    target_pct, action="preset_restore_slave_vol",
+                )
 
     async def async_play_track(self, track):
         """Play media track by name found in the tracks list."""

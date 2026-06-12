@@ -39,8 +39,9 @@ class TestPresetButton:
     async def test_valid_preset_sends_mcu_short_click(self) -> None:
         dev = _make_device()
         dev._preset_key = 4
-        dev._volume = 0  # skip the v4.5.14 vol re-apply after preset
-        await dev.async_preset_button(2)
+        dev._volume = 0
+        with patch("custom_components.linkplay.media_player.asyncio.sleep"):
+            await dev.async_preset_button(2)
         cmds = [c.args[0] for c in dev.call_linkplay_httpapi.await_args_list]
         assert "MCUKeyShortClick:2" in cmds
 
@@ -105,6 +106,56 @@ class TestPresetButton:
         assert "setPlayerCmd:vol:18" in master_cmds
         # kitchen target 18 + (-10) = 8 -> vol:8 on kitchen directly
         assert "setPlayerCmd:vol:8" in kitchen_cmds
+
+    @pytest.mark.asyncio
+    async def test_preset_resends_volume_until_firmware_keeps_it(self) -> None:
+        """v4.5.15: the firmware applies its per-source saved volume at
+        an unpredictable moment during stream startup, so a single
+        re-apply can be overwritten afterwards. Verify loop must read
+        the volume back and re-send on mismatch."""
+        dev = _make_device()
+        dev._preset_key = 4
+        dev._volume = 18
+        # 1st read: firmware restored its old per-source volume (50).
+        # 2nd read: malformed payload (ignored, no retry, no confirm).
+        # Last two reads: re-applied 18 stuck.
+        status_seq = iter(
+            [{"vol": "50"}, {"mute": "0"}, {"vol": "18"}, {"vol": "18"}]
+        )
+
+        async def fake_api(cmd, *args, **kwargs):
+            if cmd == "getPlayerStatus":
+                return next(status_seq)
+            return "OK"
+
+        dev.call_linkplay_httpapi = AsyncMock(side_effect=fake_api)
+        with patch("custom_components.linkplay.media_player.asyncio.sleep"):
+            await dev.async_preset_button(2)
+        cmds = [c.args[0] for c in dev.call_linkplay_httpapi.await_args_list]
+        # initial re-apply + one retry after the mismatched read
+        assert cmds.count("setPlayerCmd:vol:18") == 2
+        # mismatch + malformed + two confirming reads, then early exit
+        assert cmds.count("getPlayerStatus") == 4
+
+    @pytest.mark.asyncio
+    async def test_preset_verify_exits_after_consecutive_confirms(self) -> None:
+        """Volume confirmed on the first two reads -> no retry, loop
+        exits early instead of burning the full check window."""
+        dev = _make_device()
+        dev._preset_key = 4
+        dev._volume = 18
+
+        async def fake_api(cmd, *args, **kwargs):
+            if cmd == "getPlayerStatus":
+                return {"vol": "18"}
+            return "OK"
+
+        dev.call_linkplay_httpapi = AsyncMock(side_effect=fake_api)
+        with patch("custom_components.linkplay.media_player.asyncio.sleep"):
+            await dev.async_preset_button(2)
+        cmds = [c.args[0] for c in dev.call_linkplay_httpapi.await_args_list]
+        assert cmds.count("setPlayerCmd:vol:18") == 1
+        assert cmds.count("getPlayerStatus") == 2
 
     @pytest.mark.asyncio
     async def test_preset_out_of_range_warns_no_call(self) -> None:

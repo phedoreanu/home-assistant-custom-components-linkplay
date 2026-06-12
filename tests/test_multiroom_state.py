@@ -204,6 +204,65 @@ class TestJoinGracePollWindow:
         assert "media_player.kitchen" in master._multiroom_group
 
     @pytest.mark.asyncio
+    async def test_poll_skips_slave_volume_within_grace(self) -> None:
+        """v4.5.15: a ``multiroom:getSlaveList`` response in flight while
+        the group volume changed reports each slave's pre-change volume;
+        within VOLUME_CMD_GRACE the locally commanded value wins."""
+        from homeassistant.util.dt import utcnow
+
+        master = _make_device("master")
+        kitchen = _make_device("kitchen")
+        master.hass.data["linkplay"].entities = [master, kitchen]
+        master._is_master = True
+        master._multiroom_group = [
+            "media_player.master",
+            "media_player.kitchen",
+        ]
+        kitchen._volume = 8
+        kitchen._volume_cmd_at = utcnow()
+        master.call_linkplay_httpapi = AsyncMock(
+            return_value={
+                "slaves": 1,
+                "slave_list": [
+                    {"name": "kitchen", "ip": "1.2.3.4", "volume": 50},
+                ],
+            }
+        )
+
+        await master._async_poll_multiroom_master_status()
+
+        assert kitchen._volume == 8
+
+    @pytest.mark.asyncio
+    async def test_poll_updates_slave_volume_after_grace(self) -> None:
+        from datetime import timedelta
+
+        from homeassistant.util.dt import utcnow
+
+        master = _make_device("master")
+        kitchen = _make_device("kitchen")
+        master.hass.data["linkplay"].entities = [master, kitchen]
+        master._is_master = True
+        master._multiroom_group = [
+            "media_player.master",
+            "media_player.kitchen",
+        ]
+        kitchen._volume = 8
+        kitchen._volume_cmd_at = utcnow() - timedelta(seconds=10)
+        master.call_linkplay_httpapi = AsyncMock(
+            return_value={
+                "slaves": 1,
+                "slave_list": [
+                    {"name": "kitchen", "ip": "1.2.3.4", "volume": 50},
+                ],
+            }
+        )
+
+        await master._async_poll_multiroom_master_status()
+
+        assert kitchen._volume == 50
+
+    @pytest.mark.asyncio
     async def test_poll_no_response_preserves_group_during_grace(
         self,
     ) -> None:

@@ -295,6 +295,34 @@ class TestPlayerStatusBranches:
         assert dev._media_uri_final.startswith("http://stream/")
 
     @pytest.mark.asyncio
+    async def test_poll_within_volume_grace_keeps_commanded_volume(self) -> None:
+        """v4.5.15: a poll response in flight while the user changed the
+        volume carries the pre-change value; within VOLUME_CMD_GRACE the
+        locally commanded volume wins, so a preset switch that snapshots
+        ``_volume`` right then doesn't re-apply the OLD group volume."""
+        from homeassistant.util.dt import utcnow
+
+        dev = _make_device("dev")
+        dev._first_update = False
+        self._prep(dev, _stream_payload())  # payload reports vol "55"
+        dev._volume = 20
+        dev._volume_cmd_at = utcnow()
+        await dev.async_update()
+        assert dev._volume == 20
+
+    @pytest.mark.asyncio
+    async def test_poll_after_volume_grace_updates_volume(self) -> None:
+        from homeassistant.util.dt import utcnow
+
+        dev = _make_device("dev")
+        dev._first_update = False
+        self._prep(dev, _stream_payload())
+        dev._volume = 20
+        dev._volume_cmd_at = utcnow() - timedelta(seconds=10)
+        await dev.async_update()
+        assert dev._volume == "55"
+
+    @pytest.mark.asyncio
     async def test_localfile_paused_payload(self) -> None:
         dev = _make_device("dev")
         dev._first_update = False
