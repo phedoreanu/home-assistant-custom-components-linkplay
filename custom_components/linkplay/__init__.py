@@ -2,33 +2,54 @@
 Support for LinkPlay based devices.
 
 For more details about this platform, please refer to the documentation at
-https://github.com/nagyrobi/home-assistant-custom-components-linkplay
+https://github.com/phedoreanu/home-assistant-custom-components-linkplay
 """
+from __future__ import annotations
+
+import json
 import logging
+from pathlib import Path
+
 import voluptuous as vol
 
-from homeassistant.const import ATTR_ENTITY_ID
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import ATTR_ENTITY_ID, Platform
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
+
+def _read_manifest_version() -> str:
+    """Return the integration version from manifest.json."""
+    try:
+        manifest_path = Path(__file__).with_name("manifest.json")
+        return json.loads(manifest_path.read_text()).get("version", "unknown")
+    except Exception:
+        return "unknown"
+
+
+VERSION = _read_manifest_version()
+
 DOMAIN = 'linkplay'
+PLATFORMS = [Platform.MEDIA_PLAYER]
 
 SERVICE_JOIN = 'join'
 SERVICE_UNJOIN = 'unjoin'
-SERVICE_PRESET = 'preset'
+SERVICE_PRESET = 'play_preset'
 SERVICE_CMD = 'command'
 SERVICE_SNAP = 'snapshot'
 SERVICE_REST = 'restore'
-SERVICE_LIST = 'get_tracks'
 SERVICE_PLAY = 'play_track'
+SERVICE_SET_GROUP_VOLUME = 'set_group_volume'
 
 ATTR_MASTER = 'master'
-ATTR_PRESET = 'preset'
+ATTR_PRESET = 'preset_number'
 ATTR_CMD = 'command'
 ATTR_NOTIF = 'notify'
 ATTR_SNAP = 'switchinput'
 ATTR_SELECT = 'input_select'
 ATTR_SOURCE = 'source'
 ATTR_TRACK = 'track'
+ATTR_VOLUME = 'volume'
 
 SERVICE_SCHEMA = vol.Schema({
     vol.Optional(ATTR_ENTITY_ID): cv.comp_entity_ids
@@ -63,10 +84,72 @@ PLYTRK_SERVICE_SCHEMA = vol.Schema({
     vol.Required(ATTR_TRACK): cv.template
 })
 
+SET_GROUP_VOLUME_SCHEMA = vol.Schema({
+    vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+    vol.Required(ATTR_VOLUME): vol.All(vol.Coerce(float), vol.Range(min=0, max=1)),
+})
+
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup(hass, config):
-    """Handle service configuration."""
+# No top-level YAML configuration for the integration itself — YAML users
+# still configure entities via the media_player platform schema.
+CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
+
+
+class LinkPlayData:
+    """Storage class for platform global data."""
+    def __init__(self):
+        """Initialize the data."""
+        self.entities = []
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the Linkplay component from YAML configuration."""
+    hass.data.setdefault(DOMAIN, LinkPlayData())
+    _LOGGER.info("Linkplay integration v%s loaded (YAML)", VERSION)
+    await async_setup_services(hass)
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up Linkplay from a config entry."""
+    hass.data.setdefault(DOMAIN, LinkPlayData())
+    _LOGGER.info(
+        "Linkplay integration v%s loading entry %r",
+        VERSION, entry.title,
+    )
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    if not hass.services.has_service(DOMAIN, SERVICE_JOIN):
+        await async_setup_services(hass)
+
+    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+    return True
+
+
+async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload config entry."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload a config entry."""
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+    if unload_ok and not hass.config_entries.async_entries(DOMAIN):
+        for service in (
+            SERVICE_JOIN, SERVICE_UNJOIN, SERVICE_PRESET, SERVICE_CMD,
+            SERVICE_SNAP, SERVICE_REST, SERVICE_PLAY, SERVICE_SET_GROUP_VOLUME,
+        ):
+            if hass.services.has_service(DOMAIN, service):
+                hass.services.async_remove(DOMAIN, service)
+
+    return unload_ok
+
+
+async def async_setup_services(hass: HomeAssistant) -> None:
+    """Set up services for Linkplay integration."""
 
     async def async_service_handle(service):
         """Handle services."""
@@ -78,6 +161,8 @@ async def async_setup(hass, config):
         if entity_ids:
             if entity_ids == 'all':
                 entity_ids = [e.entity_id for e in entities]
+            elif isinstance(entity_ids, str):
+                entity_ids = [entity_ids]
             entities = [e for e in entities if e.entity_id in entity_ids]
 
         if service.service == SERVICE_JOIN:
@@ -137,7 +222,21 @@ async def async_setup(hass, config):
                     _LOGGER.debug("**PLAY TRACK** entity: %s; track: %s", device.entity_id, track)
                     await device.async_play_track(track)
 
+        elif service.service == SERVICE_SET_GROUP_VOLUME:
+            volume = service.data.get(ATTR_VOLUME)
 
+            master_device = next(
+                (d for d in entities if d.entity_id in entity_ids), None
+            )
+            if master_device:
+                _LOGGER.debug(
+                    "**SET GROUP VOLUME** master: %s; volume: %s",
+                    master_device.entity_id,
+                    volume,
+                )
+                await master_device.async_set_group_volume(volume)
+
+    # Register all services
     hass.services.async_register(
         DOMAIN, SERVICE_JOIN, async_service_handle, schema=JOIN_SERVICE_SCHEMA)
     hass.services.async_register(
@@ -152,5 +251,5 @@ async def async_setup(hass, config):
         DOMAIN, SERVICE_REST, async_service_handle, schema=REST_SERVICE_SCHEMA)
     hass.services.async_register(
         DOMAIN, SERVICE_PLAY, async_service_handle, schema=PLYTRK_SERVICE_SCHEMA)
-
-    return True
+    hass.services.async_register(
+        DOMAIN, SERVICE_SET_GROUP_VOLUME, async_service_handle, schema=SET_GROUP_VOLUME_SCHEMA)

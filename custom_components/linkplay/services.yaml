@@ -66,7 +66,7 @@ restore:
         entity:
           integration: linkplay
 
-preset:
+play_preset:
   name: Preset
   description: Recall content preset from the device.
   fields:
@@ -78,7 +78,7 @@ preset:
       selector:
         entity:
           integration: linkplay
-    preset:
+    preset_number:
       name: Preset
       description: Content preset number on the device
       example: 1
@@ -147,3 +147,33 @@ play_track:
       required: true
       selector:
         text:
+
+set_group_volume:
+  name: Set Group Volume
+  description: >-
+    Set the master volume and apply each slave's configured volume_offset.
+    Mirrors mini-media-player's per-entity offset behaviour: master goes to
+    ``volume``, each slave goes to ``volume + slave_volume_offset/100``,
+    clamped to [0.0, 1.0]. Configure each slave's offset via the integration
+    options flow (Configure button on the integration card).
+  fields:
+    entity_id:
+      name: Master Entity ID
+      description: Master speaker of the multiroom group.
+      example: media_player.sound_room1
+      required: true
+      selector:
+        entity:
+          integration: linkplay
+    volume:
+      name: Master Volume
+      description: New master volume (0.0 to 1.0). Slaves shift by their configured offset.
+      example: 0.5
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 0.01
+          mode: slider
+

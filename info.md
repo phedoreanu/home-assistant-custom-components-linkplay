@@ -1,11 +1,15 @@
 # Linkplay-based speakers and sound devices
 
-**The `linkplay` custom component for Home Assistant is deprecated, and unsupported! Starting with Home Assistant 2024.08 release, Linkplay chipset based media players are officially supported without the need of any custom component.**
+Custom Home Assistant integration for LinkPlay chipset-based Wi-Fi audio devices (Arylic, August, iEAST, and many others).
 
-To switch to the official LinkPlay integration starting from **2024.08**, follow these steps:
-* Remove the current `linkplay` configuration from your configuration.yaml.
-* Restart Home-Assistant.
-* Delete the custom component through HACS or manually by deleting the `custom_components/linkplay` folder.
-* Restart Home-Assistant again. Your players will be automatically discovered, a notification popup will inform you on this.
+This fork is actively maintained as an alternative to the built-in `linkplay` integration shipped with Home Assistant 2024.08+, offering extended features such as:
 
-For any bugs, feature requests, or PRs, please use the official Home Assistant channels.
+* Multiroom join/unjoin with master/slave control
+* Group volume with per-speaker offsets
+* Preset playback, snapshot/restore, raw command service
+* Icecast metadata, Spotify metadata via UPnP
+* Options flow for icecast metadata mode, volume step, LED, and Wi-Fi-direct multiroom
+
+Configure via the UI: **Settings → Devices & Services → Add Integration → Linkplay**.
+
+Bugs / feature requests: see GitHub issues.
