@@ -225,7 +225,12 @@ class LinkPlaySomaFmFetcherMixin:
         prev = (self._media_title, self._media_artist)
         track_changed = (title, display_artist) != prev
         self._media_title = title
-        self._media_artist = display_artist
+        # Keep the RAW artist in place while the artwork chain runs: the
+        # iTunes Search term is built from ``_media_artist``, so a
+        # "(Station)" suffix here poisons the query ("efesoul (Fluid)
+        # <title>" -> no match -> no cover). The display suffix is
+        # re-applied after art resolution, below.
+        self._media_artist = artist
         if album:
             self._media_album = album
 
@@ -263,6 +268,10 @@ class LinkPlaySomaFmFetcherMixin:
             self._media_image_url = albumart
         if not self._media_image_url and channel_image:
             self._media_image_url = channel_image
+
+        # Art resolved against the raw artist; now apply the station label
+        # for the card, e.g. "efesoul (Fluid)".
+        self._media_artist = display_artist
         if (title, display_artist) != prev:
             _LOGGER.debug(
                 "[%s @ %s] SomaFM %s -> %r / %r (art=%s)",

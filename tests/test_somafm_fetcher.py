@@ -292,6 +292,52 @@ class TestUpdateFromSomafm:
         assert "mzstatic" in dev._media_image_url
 
     @pytest.mark.asyncio
+    async def test_itunes_lookup_sees_raw_artist_not_station_suffix(self) -> None:
+        """Regression: the station "(<channel>)" suffix must NOT leak into
+        the iTunes Search. iTunes builds its term from ``_media_artist``,
+        so the suffix has to be applied only AFTER artwork resolution -
+        otherwise the term is "Kodomo (Drone Zone) <title>" and every
+        cover lookup misses, leaving the card on the station logo."""
+        dev = _make_device()
+        dev._media_title = "SomaFM: Drone Zone"
+        dev._somafm_cached_station = "SomaFM: Drone Zone"
+
+        resp = MagicMock()
+        resp.status = 200
+        resp.json = AsyncMock(return_value={
+            "songs": [{
+                "title": "Spira Mirabilis",
+                "artist": "Kodomo",
+                "album": "Patterns and Light",
+            }]
+        })
+        session = MagicMock()
+        session.get = AsyncMock(return_value=resp)
+
+        seen = {}
+
+        def _capture_artist():
+            # Snapshot what iTunes would search on at call time.
+            seen["artist"] = dev._media_artist
+            seen["title"] = dev._media_title
+            return True
+
+        dev.async_get_itunes_artwork = AsyncMock(side_effect=_capture_artist)
+
+        with patch(
+            "custom_components.linkplay.somafm_fetcher_mixin.async_get_clientsession",
+            return_value=session,
+        ):
+            ok = await dev.async_update_from_somafm.__wrapped__(dev)
+
+        assert ok is True
+        # iTunes saw the raw artist, no "(Drone Zone)" suffix.
+        assert seen["artist"] == "Kodomo"
+        assert seen["title"] == "Spira Mirabilis"
+        # But the card still ends up with the station label applied.
+        assert dev._media_artist == "Kodomo (Drone Zone)"
+
+    @pytest.mark.asyncio
     async def test_itunes_art_persists_through_throttled_calls(self) -> None:
         """Once iTunes has populated the cover for a track, subsequent
         polls inside the same track must keep it - the SomaFM channel
